@@ -1,0 +1,22 @@
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Opcional: Archivos temporales
+*.tmp
+*.swp
+
+# Opcional: salida de build (si compilaras algo)
+dist/
+build/

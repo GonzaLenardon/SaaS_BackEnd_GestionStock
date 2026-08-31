@@ -1,0 +1,40 @@
+{
+  "development": {
+    "username": "chelita",
+    "password": "O2NJGcWTeE0yFhTFVt6r9BnKKQQ6lq80",
+    "database": "GestionStock",
+    "host": "dpg-cvnea4muk2gs73arc8i0-a.oregon-postgres.render.com",
+    "dialect": "postgres",
+    "dialectOptions": {
+      "ssl": {
+        "require": true,
+        "rejectUnauthorized": false
+      }
+    },
+    "pool": {
+      "max": 5,
+      "min": 0,
+      "acquire": 30000,
+      "idle": 10000
+    }
+  },
+  "production": {
+    "username": "chelita",
+    "password": "O2NJGcWTeE0yFhTFVt6r9BnKKQQ6lq80",
+    "database": "GestionStock",
+    "host": "dpg-cvnea4muk2gs73arc8i0-a.oregon-postgres.render.com",
+    "dialect": "postgres",
+    "dialectOptions": {
+      "ssl": {
+        "require": true,
+        "rejectUnauthorized": false
+      }
+    },
+    "pool": {
+      "max": 5,
+      "min": 0,
+      "acquire": 30000,
+      "idle": 10000
+    }
+  }
+}
