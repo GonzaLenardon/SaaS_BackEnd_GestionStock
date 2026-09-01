@@ -80,7 +80,7 @@ WHERE su.id_sucursal = :idSucursal
       replacements.idCliente = req.id_cliente;
     }
 
-    query += ` AND p.activo = true`;
+    query += ` AND p.activo = 1`;
 
     query += `
 GROUP BY 

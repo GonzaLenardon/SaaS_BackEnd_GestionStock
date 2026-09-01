@@ -119,9 +119,9 @@ const productosStock = async (req, res) => {
   COALESCE(suma_stock.total_stock, 0) AS stock_total_producto,
 
   CASE 
-    WHEN COUNT(s.id_sucursal) = 0 THEN '[]'::json
-    ELSE json_agg(
-      json_build_object(
+    WHEN COUNT(s.id_sucursal) = 0 THEN JSON_ARRAY()
+    ELSE JSON_ARRAYAGG(
+      JSON_OBJECT(
         'id_sucursal', s.id_sucursal,
         'nombre_sucursal', s.nombre,
         'stock_total', COALESCE(s.stock_total, 0)
@@ -164,7 +164,7 @@ WHERE 1=1
 
     // Solo mostrar productos activos (excepto si se pide incluir inactivos)
     if (!req.query.includeInactive) {
-      query += ` AND p.activo = true`;
+      query += ` AND p.activo = 1`;
     }
 
     query += `

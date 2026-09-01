@@ -23,8 +23,8 @@ async function crearAdmin() {
     await sequelize.authenticate();
 
     const [existe] = await sequelize.query(
-      `SELECT id_usuario FROM usuarios WHERE nombre = :nombre LIMIT 1`,
-      { replacements: { nombre }, type: sequelize.QueryTypes.SELECT }
+      `SELECT id_usuario FROM usuarios WHERE nombre = ? LIMIT 1`,
+      { replacements: [nombre], type: sequelize.QueryTypes.SELECT }
     );
 
     if (existe) {
@@ -37,15 +37,16 @@ async function crearAdmin() {
     const ahora = new Date();
 
     await sequelize.query(
-      `INSERT INTO usuarios (nombre, password, salt, rol, id_cliente, id_sucursal, activo, "createdAt", "updatedAt")
-       VALUES (:nombre, :password, :salt, 'superadmin', NULL, NULL, true, :ahora, :ahora)`,
+      `INSERT INTO usuarios (nombre, password, salt, rol, id_cliente, id_sucursal, activo, createdAt, updatedAt)
+       VALUES (?, ?, ?, 'superadmin', NULL, NULL, 1, ?, ?)`,
       {
-        replacements: {
+        replacements: [
           nombre,
-          password: passwordHash,
+          passwordHash,
           salt,
           ahora,
-        },
+          ahora,
+        ],
       }
     );
 

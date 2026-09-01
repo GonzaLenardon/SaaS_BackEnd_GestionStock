@@ -1,24 +1,33 @@
 /**
  * Script de migración para ejecutar SQL desde Node.js.
+ * Soporta MySQL/MariaDB con multi-statement queries.
+ *
  * Uso:
  *   npm run migrate
- *
- * Este script lee TODOS los archivos .sql de la carpeta migrations/
- * en orden alfabético y ejecuta cada statement usando la conexión
- * Sequelize configurada con las variables de entorno.
  */
 
 const fs = require('fs');
 const path = require('path');
-const sequelize = require('../db/conection');
+require('dotenv').config();
+const mysql = require('mysql2/promise');
 
 async function runMigration() {
+  let connection;
+
   try {
     console.log('🚀 Iniciando migraciones...\n');
 
-    console.log('🔍 Validando conexión a PostgreSQL...');
-    await sequelize.authenticate();
-    console.log('✅ Conexión exitosa\n');
+    // Conectar directamente con mysql2 (multiStatements habilitado)
+    connection = await mysql.createConnection({
+      host: process.env.DB_HOST,
+      port: process.env.DB_PORT,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASS,
+      database: process.env.DB_NAME,
+      multipleStatements: true,
+    });
+
+    console.log('✅ Conexión exitosa a MySQL\n');
 
     const migrationsDir = path.join(__dirname, '..', 'migrations');
     const files = fs.readdirSync(migrationsDir)
@@ -42,68 +51,26 @@ async function runMigration() {
 
       const sql = fs.readFileSync(migrationPath, 'utf8');
 
-      // Dividir por statements, manejando bloques $$...$$ (PL/pgSQL)
-      const statements = [];
-      let current = '';
-      let inBlock = false;
-
-      for (const line of sql.split('\n')) {
-        const trimmed = line.trim();
-
-        // Ignorar comentarios de línea completa
-        if (trimmed.startsWith('--') && !inBlock) {
-          continue;
-        }
-
-        // Detectar bloques $$ (PL/pgSQL)
-        if (trimmed.includes('$$')) {
-          inBlock = !inBlock;
-        }
-
-        current += line + '\n';
-
-        // Si termina con ; y no estamos en un bloque, es un statement completo
-        if (trimmed.endsWith(';') && !inBlock) {
-          const stmt = current.trim();
-          if (stmt.length > 0) {
-            statements.push(stmt);
-          }
-          current = '';
+      try {
+        // Ejecutar todo el archivo SQL como una multi-statement query
+        await connection.query(sql);
+        console.log(`   ✅ Migración ejecutada correctamente`);
+      } catch (err) {
+        const msg = err.message || err.toString();
+        // Ignorar errores de "ya existe"
+        if (
+          msg.includes('already exists') ||
+          msg.includes('Duplicate') ||
+          msg.includes('duplicate key') ||
+          msg.includes('duplicate entry') ||
+          (msg.includes('column') && msg.includes('already exists'))
+        ) {
+          console.log(`   ⏭️  Ya existía, ignorado`);
+        } else {
+          console.error(`   ❌ Error: ${msg}`);
+          throw err;
         }
       }
-
-      // Último statement si quedó algo
-      if (current.trim().length > 0) {
-        statements.push(current.trim());
-      }
-
-      console.log(`   📝 ${statements.length} statements a ejecutar`);
-
-      let ejecutados = 0;
-      let ignorados = 0;
-
-      for (let i = 0; i < statements.length; i++) {
-        const statement = statements[i];
-        try {
-          if (statement.length === 0) continue;
-          await sequelize.query(statement, { raw: true });
-          ejecutados++;
-        } catch (err) {
-          const msg = err.message || err.toString();
-          if (
-            msg.includes('already exists') ||
-            msg.includes('duplicate key value') ||
-            msg.includes('column') && msg.includes('already exists')
-          ) {
-            ignorados++;
-          } else {
-            console.error(`   ❌ Error en statement ${i + 1}: ${msg}`);
-            throw err;
-          }
-        }
-      }
-
-      console.log(`   ✅ ${ejecutados} ejecutados, ${ignorados} ignorados (ya existían)`);
     }
 
     console.log('\n🎉 Todas las migraciones completadas correctamente.');
@@ -111,6 +78,8 @@ async function runMigration() {
   } catch (error) {
     console.error('\n❌ Error en migración:', error.message || error);
     process.exit(1);
+  } finally {
+    if (connection) await connection.end();
   }
 }
 

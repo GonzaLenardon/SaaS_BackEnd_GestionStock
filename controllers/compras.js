@@ -68,7 +68,6 @@ const { Op } = require('sequelize');
       detallesConCompra,
       {
         transaction: t,
-        returning: true,
       }
     );
 
@@ -134,7 +133,6 @@ const addCompra = async (req, res) => {
       detallesConCompra,
       {
         transaction: t,
-        returning: true,
       }
     );
 

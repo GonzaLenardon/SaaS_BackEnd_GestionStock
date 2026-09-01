@@ -9,9 +9,9 @@ async function rollbackCambio(idCambio) {
     // 1) OBTENER CAMBIO
     // =========================================================
     const [cambio] = await db.query(
-      'SELECT * FROM cambios WHERE id_cambio = $1',
+      'SELECT * FROM cambios WHERE id_cambio = ?',
       {
-        bind: [idCambio],
+        replacements: [idCambio],
         type: QueryTypes.SELECT,
         transaction,
       },
@@ -27,9 +27,9 @@ async function rollbackCambio(idCambio) {
     // 2) OBTENER VENTA ORIGINAL
     // =========================================================
     const [ventaOriginal] = await db.query(
-      'SELECT * FROM ventas WHERE id_venta = $1',
+      'SELECT * FROM ventas WHERE id_venta = ?',
       {
-        bind: [cambio.id_venta_original],
+        replacements: [cambio.id_venta_original],
         type: QueryTypes.SELECT,
         transaction,
       },
@@ -49,9 +49,9 @@ async function rollbackCambio(idCambio) {
     // 3) OBTENER DETALLES DEL CAMBIO
     // =========================================================
     const detalleCambios = await db.query(
-      'SELECT * FROM detallecambios WHERE id_cambio = $1 ORDER BY id_detalle_cambio ASC',
+      'SELECT * FROM detallecambios WHERE id_cambio = ? ORDER BY id_detalle_cambio ASC',
       {
-        bind: [idCambio],
+        replacements: [idCambio],
         type: QueryTypes.SELECT,
         transaction,
       },
@@ -78,16 +78,15 @@ async function rollbackCambio(idCambio) {
       // Se había SUMADO stock -> ahora RESTAR
       // =====================================================
       if (detalle.tipo === 'devuelve') {
-        const stockUpdated = await db.query(
+        await db.query(
           `
           UPDATE stock_sucursal
-          SET stock = stock - $1
-          WHERE id_detalle_compra = $2
-          AND id_sucursal = $3
-          RETURNING *
+          SET stock = stock - ?
+          WHERE id_detalle_compra = ?
+          AND id_sucursal = ?
           `,
           {
-            bind: [detalle.cantidad, detalle.id_detalle_compra, idSucursal],
+            replacements: [detalle.cantidad, detalle.id_detalle_compra, idSucursal],
             type: QueryTypes.UPDATE,
             transaction,
           },
@@ -99,12 +98,12 @@ async function rollbackCambio(idCambio) {
         await db.query(
           `
           UPDATE detalleventas
-          SET es_reversado = false,
+          SET es_reversado = 0,
               id_cambio_asociado = NULL
-          WHERE id_cambio_asociado = $1
+          WHERE id_cambio_asociado = ?
           `,
           {
-            bind: [detalle.id_detalle_cambio],
+            replacements: [detalle.id_detalle_cambio],
             type: QueryTypes.UPDATE,
             transaction,
           },
@@ -119,12 +118,12 @@ async function rollbackCambio(idCambio) {
         await db.query(
           `
           UPDATE stock_sucursal
-          SET stock = stock + $1
-          WHERE id_detalle_compra = $2
-          AND id_sucursal = $3
+          SET stock = stock + ?
+          WHERE id_detalle_compra = ?
+          AND id_sucursal = ?
           `,
           {
-            bind: [detalle.cantidad, detalle.id_detalle_compra, idSucursal],
+            replacements: [detalle.cantidad, detalle.id_detalle_compra, idSucursal],
             type: QueryTypes.UPDATE,
             transaction,
           },
@@ -136,10 +135,10 @@ async function rollbackCambio(idCambio) {
         await db.query(
           `
           DELETE FROM detalleventas
-          WHERE id_cambio_asociado = $1
+          WHERE id_cambio_asociado = ?
           `,
           {
-            bind: [detalle.id_detalle_cambio],
+            replacements: [detalle.id_detalle_cambio],
             transaction,
           },
         );
@@ -157,10 +156,10 @@ async function rollbackCambio(idCambio) {
       await db.query(
         `
         DELETE FROM detalleventas
-        WHERE id_venta = $1
+        WHERE id_venta = ?
         `,
         {
-          bind: [cambio.id_venta_diferencia],
+          replacements: [cambio.id_venta_diferencia],
           transaction,
         },
       );
@@ -168,10 +167,10 @@ async function rollbackCambio(idCambio) {
       await db.query(
         `
         DELETE FROM ventas
-        WHERE id_venta = $1
+        WHERE id_venta = ?
         `,
         {
-          bind: [cambio.id_venta_diferencia],
+          replacements: [cambio.id_venta_diferencia],
           transaction,
         },
       );
@@ -183,10 +182,10 @@ async function rollbackCambio(idCambio) {
     await db.query(
       `
       DELETE FROM detallecambios
-      WHERE id_cambio = $1
+      WHERE id_cambio = ?
       `,
       {
-        bind: [idCambio],
+        replacements: [idCambio],
         transaction,
       },
     );
@@ -199,10 +198,10 @@ async function rollbackCambio(idCambio) {
     await db.query(
       `
       DELETE FROM cambios
-      WHERE id_cambio = $1
+      WHERE id_cambio = ?
       `,
       {
-        bind: [idCambio],
+        replacements: [idCambio],
         transaction,
       },
     );
@@ -214,12 +213,12 @@ async function rollbackCambio(idCambio) {
     // =========================================================
     const cambiosRestantes = await db.query(
       `
-      SELECT COUNT(*)::int AS total
+      SELECT CAST(COUNT(*) AS UNSIGNED) AS total
       FROM cambios
-      WHERE id_venta_original = $1
+      WHERE id_venta_original = ?
       `,
       {
-        bind: [cambio.id_venta_original],
+        replacements: [cambio.id_venta_original],
         type: QueryTypes.SELECT,
         transaction,
       },
@@ -231,11 +230,11 @@ async function rollbackCambio(idCambio) {
       await db.query(
         `
         UPDATE ventas
-        SET tiene_cambios = false
-        WHERE id_venta = $1
+        SET tiene_cambios = 0
+        WHERE id_venta = ?
         `,
         {
-          bind: [cambio.id_venta_original],
+          replacements: [cambio.id_venta_original],
           type: QueryTypes.UPDATE,
           transaction,
         },

@@ -17,6 +17,14 @@ Thumbs.db
 *.tmp
 *.swp
 
-# Opcional: salida de build (si compilaras algo)
+# Opcional: salida de build
 dist/
 build/
+
+# Archivos generados en runtime
+uploads/
+
+# Agentes / Skills
+.agents/
+skills-lock.json
+AGENTS.md
