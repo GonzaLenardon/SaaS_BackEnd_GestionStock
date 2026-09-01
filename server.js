@@ -11,11 +11,7 @@ app.use(fileUpload({
   abortOnLimit: true,
   createParentPath: true,
 }));
-const PORT = process.env.PORT;
-if (!PORT) {
-  console.error('❌ Variable PORT no definida. Configurar en .env o variables de entorno.');
-  process.exit(1);
-}
+const PORT = process.env.PORT || 3000;
 const ventas = require('./models/ventas');
 const DetalleVentas = require('./models/detalleVentas');
 
