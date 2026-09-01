@@ -12,7 +12,7 @@ const sequelize = new Sequelize(
     host: process.env.DB_HOST,
     port: process.env.DB_PORT,
     dialect: 'mysql',
-    dialectOptions: isProduction
+    dialectOptions: process.env.DB_SSL === 'true'
       ? {
           ssl: {
             require: true,
