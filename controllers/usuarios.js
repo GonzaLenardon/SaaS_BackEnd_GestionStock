@@ -20,7 +20,7 @@ const allUsers = async (req, res) => {
         {
           model: Clientes,
           as: 'cliente',
-          attributes: ['razon_social'],
+          attributes: ['razon_social', 'dominio'],
         },
       ],
     });
@@ -60,7 +60,7 @@ const upUser = async (req, res) => {
     }
 
     // Solo admin y superadmin pueden cambiar roles
-    const updates = { nombre, id_sucursal };
+    const updates = { nombre: nombre?.toLowerCase().trim(), id_sucursal };
     if (rol && (req.user.rol === 'admin' || req.user.rol === 'superadmin')) {
       if (req.user.rol === 'admin' && rol === 'superadmin') {
         return res.status(403).json({ message: 'No podés asignar rol de superadmin' });
@@ -94,8 +94,13 @@ const upUser = async (req, res) => {
 
 const addUser = async (req, res) => {
   try {
-    const { nombre, rol, id_sucursal } = req.body;
+    const nombre = req.body.nombre?.toLowerCase().trim();
+    const { rol, id_sucursal } = req.body;
     const password = req.body.password;
+
+    if (!nombre) {
+      return res.status(400).json({ message: 'El nombre es requerido' });
+    }
 
     if (!password || password.length < 6) {
       return res.status(400).json({ message: 'La contraseña es requerida (mínimo 6 caracteres)' });
@@ -132,8 +137,13 @@ const addUser = async (req, res) => {
  */
 const addUserAsSuperadmin = async (req, res) => {
   try {
-    const { nombre, rol, id_sucursal, id_cliente, password: passBody } = req.body;
+    const nombre = req.body.nombre?.toLowerCase().trim();
+    const { rol, id_sucursal, id_cliente, password: passBody } = req.body;
     const password = passBody;
+
+    if (!nombre) {
+      return res.status(400).json({ message: 'El nombre es requerido' });
+    }
 
     if (!password || password.length < 6) {
       return res.status(400).json({ message: 'La contraseña es requerida (mínimo 6 caracteres)' });
@@ -143,8 +153,8 @@ const addUserAsSuperadmin = async (req, res) => {
       return res.status(400).json({ message: 'id_cliente es requerido' });
     }
 
-    if (!nombre || !rol) {
-      return res.status(400).json({ message: 'nombre y rol son requeridos' });
+    if (!rol) {
+      return res.status(400).json({ message: 'rol es requerido' });
     }
 
     // Verificar que el cliente exista
@@ -187,7 +197,7 @@ const login = async (req, res) => {
   try {
     // Parsear formato: "tienda1.admin" o "tienda1@admin" o "admin"
     let clienteSlug = null;
-    let userName = nombre;
+    let userName = nombre.toLowerCase().trim();
 
     if (nombre.includes('.')) {
       const parts = nombre.split('.');
@@ -308,14 +318,20 @@ const login = async (req, res) => {
 };
 
 const resetPassword = async (req, res) => {
-  const { nombre, new_password } = req.body;
+  const nombre = req.body.nombre?.toLowerCase().trim();
+  const { new_password } = req.body;
 
   try {
     if (!new_password || new_password.length < 6) {
       return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres' });
     }
 
-    const user = await Usuarios.findOne({ where: { nombre, id_cliente: req.id_cliente } });
+    const where = { nombre };
+    if (req.user.rol !== 'superadmin') {
+      where.id_cliente = req.id_cliente;
+    }
+
+    const user = await Usuarios.findOne({ where });
 
     if (!user) {
       return res.status(404).json({ message: 'Usuario no encontrado' });
