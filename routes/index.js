@@ -1,7 +1,6 @@
 const { Router } = require('express');
 const { authMiddleware, requireRole } = require('../controllers/authMiddleware');
 const { tenantMiddleware } = require('../controllers/tenantMiddleware');
-const { subdomainMiddleware } = require('../controllers/subdomainMiddleware');
 const router = Router();
 const rollbackCambio = require('../rollback-cambio');
 
@@ -110,57 +109,17 @@ const { registrarCambioProducto } = require('../controllers/cambios');
 // ============================================================
 // RUTAS PÚBLICAS (sin auth)
 // ============================================================
-router.post('/user/login', subdomainMiddleware, login);
 
-// Resolver empresa por nombre (para login sin subdominio)
-router.post('/resolver-empresa', async (req, res) => {
-  const { Op } = require('sequelize');
-  const { Clientes } = require('../models');
-  const { empresa } = req.body;
-
-  if (!empresa || !empresa.trim()) {
-    return res.status(400).json({ message: 'El nombre de la empresa es requerido' });
-  }
-
-  try {
-    // Buscar por dominio exacto primero, luego por razon_social parcial
-    let cliente = await Clientes.findOne({
-      where: { dominio: empresa.trim(), activo: true },
-      attributes: ['id_cliente', 'razon_social', 'dominio', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo', 'logo_url'],
-    });
-
-    if (!cliente) {
-      cliente = await Clientes.findOne({
-        where: {
-          razon_social: { [Op.iLike]: `%${empresa.trim()}%` },
-          activo: true,
-        },
-        attributes: ['id_cliente', 'razon_social', 'dominio', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo', 'logo_url'],
-      });
-    }
-
-    if (!cliente) {
-      return res.status(404).json({ message: 'No se encontró ninguna empresa con ese nombre' });
-    }
-
-    res.status(200).json({
-      id_cliente: cliente.id_cliente,
-      razon_social: cliente.razon_social,
-      dominio: cliente.dominio,
-      branding: {
-        razon_social: cliente.razon_social,
-        color_primario: cliente.color_primario,
-        color_secundario: cliente.color_secundario,
-        color_terciario: cliente.color_terciario,
-        color_fondo: cliente.color_fondo,
-        logo_url: cliente.logo_url,
-      },
-    });
-  } catch (error) {
-    console.error('Error al resolver empresa:', error);
-    res.status(500).json({ message: 'Error en el servidor' });
-  }
+router.get('/', (req, res) => {
+  res.json({
+    ok: true,
+    mensaje: '¡Hola Gestion Tienda! 🚀',
+    version: '0.0.1',
+  });
 });
+
+
+router.post('/user/login', login);
 
 // ============================================================
 // RUTAS DE CLIENTES (solo superadmin - sin tenantMiddleware)

@@ -184,12 +184,59 @@ const login = async (req, res) => {
     return res.status(400).json({ mensaje: 'nombre y password son requeridos' });
   }
 
-  // id_cliente viene del subdomainMiddleware (si hay subdominio) o del body
-  const id_cliente = req.id_cliente || req.body.id_cliente;
-
   try {
-    // Si hay id_cliente, filtrar por tenant. Si no (superadmin/global), buscar por nombre solo.
-    const whereClause = { nombre, activo: true };
+    // Parsear formato: "tienda1.admin" o "tienda1@admin" o "admin"
+    let clienteSlug = null;
+    let userName = nombre;
+
+    if (nombre.includes('.')) {
+      const parts = nombre.split('.');
+      clienteSlug = parts[0];
+      userName = parts.slice(1).join('.');
+    } else if (nombre.includes('@')) {
+      const parts = nombre.split('@');
+      clienteSlug = parts[0];
+      userName = parts[1];
+    }
+
+    let id_cliente = null;
+    let clienteBranding = null;
+
+    if (clienteSlug) {
+      // Buscar cliente por dominio o razon_social
+      const { Op } = require('sequelize');
+      let cliente = await Clientes.findOne({
+        where: { dominio: clienteSlug, activo: true },
+        attributes: ['id_cliente', 'razon_social', 'logo_url', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo'],
+      });
+
+      if (!cliente) {
+        cliente = await Clientes.findOne({
+          where: {
+            razon_social: { [Op.iLike]: `%${clienteSlug}%` },
+            activo: true,
+          },
+          attributes: ['id_cliente', 'razon_social', 'logo_url', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo'],
+        });
+      }
+
+      if (!cliente) {
+        return res.status(401).json({ mensaje: 'Empresa no encontrada' });
+      }
+
+      id_cliente = cliente.id_cliente;
+      clienteBranding = {
+        razon_social: cliente.razon_social,
+        logo_url: cliente.logo_url,
+        color_primario: cliente.color_primario,
+        color_secundario: cliente.color_secundario,
+        color_terciario: cliente.color_terciario,
+        color_fondo: cliente.color_fondo,
+      };
+    }
+
+    // Buscar usuario
+    const whereClause = { nombre: userName, activo: true };
     if (id_cliente) {
       whereClause.id_cliente = id_cliente;
     }
@@ -207,9 +254,8 @@ const login = async (req, res) => {
       where: { id_sucursal: user.id_sucursal },
     });
 
-    // Obtener branding del cliente (colores, logo, razon_social)
-    let clienteBranding = null;
-    if (user.id_cliente) {
+    // Obtener branding del cliente si no se obtuvo antes
+    if (!clienteBranding && user.id_cliente) {
       const cliente = await Clientes.findByPk(user.id_cliente, {
         attributes: ['razon_social', 'logo_url', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo'],
       });
@@ -234,7 +280,7 @@ const login = async (req, res) => {
       nombre_sucursal: sucursal ? sucursal.nombre : null,
     };
 
-    const token = jwt.sign(payload, process.env.SECRET, { expiresIn: '8h' });
+    const token = jwt.sign(payload, process.env.SECRET, { expiresIn: '5h' });
 
     const isProduction = process.env.NODE_ENV === 'production';
 
@@ -243,12 +289,12 @@ const login = async (req, res) => {
         httpOnly: true,
         secure: isProduction,
         sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 8 * 60 * 60 * 1000,
+        maxAge: 5 * 60 * 60 * 1000,
       })
 
       .status(200)
       .json({
-        user: nombre,
+        user: user.nombre,
         id: user.id_usuario,
         mensaje: 'Autorizado',
         Sucursal: user.id_sucursal,
