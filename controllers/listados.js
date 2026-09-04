@@ -188,7 +188,7 @@ const resumenVentasDesdeHasta = async (req, res) => {
         {
           model: TipoVenta,
           as: 'tipoVenta',
-          attributes: ['tipoVenta', 'id_tipo'],
+          attributes: ['tipoVenta', 'id_tipo', 'color'],
         },
       ],
     });
@@ -230,6 +230,7 @@ const resumenVentasDesdeHasta = async (req, res) => {
         resumenMap.set(idTipoVenta, {
           id_tipo_venta: idTipoVenta,
           tipo_venta: tipoVentaNombre,
+          color: venta.tipoVenta?.color || '#FF6B9D',
           transacciones: 0,
           suma_total: 0,
         });
@@ -243,6 +244,7 @@ const resumenVentasDesdeHasta = async (req, res) => {
     const data = Array.from(resumenMap.values()).map((resumen) => ({
       id_tipo_venta: resumen.id_tipo_venta,
       tipo_venta: resumen.tipo_venta,
+      color: resumen.color,
       transacciones: resumen.transacciones,
       suma_total: parseFloat(resumen.suma_total.toFixed(2)),
     }));

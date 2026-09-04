@@ -13,7 +13,7 @@ const allTipoVentas = async (req, res) => {
 
 const addTipoVenta = async (req, res) => {
   try {
-    const { tipoVenta, porcentajeVenta, habilitado, color } = req.body;
+    const { tipoVenta, porcentajeVenta, tipo_porcentaje, habilitado, color } = req.body;
 
     const tipoV = await TipoVenta.findOne({
       where: { tipoVenta, id_cliente: req.id_cliente },
@@ -26,6 +26,7 @@ const addTipoVenta = async (req, res) => {
     const newTipoVenta = await TipoVenta.create({
       tipoVenta,
       porcentajeVenta,
+      tipo_porcentaje: tipo_porcentaje || 'descuento',
       habilitado,
       color: color || '#FF6B9D',
       id_cliente: req.id_cliente,
@@ -44,7 +45,7 @@ const addTipoVenta = async (req, res) => {
 };
 
 const updateTipoVenta = async (req, res) => {
-  const { id_tipo, tipoVenta, porcentajeVenta, habilitado, color } = req.body;
+  const { id_tipo, tipoVenta, porcentajeVenta, tipo_porcentaje, habilitado, color } = req.body;
 
   try {
     const where = req.user.rol === 'superadmin'
@@ -58,7 +59,7 @@ const updateTipoVenta = async (req, res) => {
     }
 
     await TipoVenta.update(
-      { tipoVenta, porcentajeVenta, habilitado, color },
+      { tipoVenta, porcentajeVenta, tipo_porcentaje, habilitado, color },
       { where }
     );
 

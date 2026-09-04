@@ -149,7 +149,7 @@ const desdeHasta = async (req, res) => {
         {
           model: TipoVenta,
           as: 'tipoVenta',
-          attributes: ['tipoVenta'],
+          attributes: ['tipoVenta', 'color'],
         },
       ],
     });
@@ -276,7 +276,7 @@ const ventasPorSucursal = async (req, res) => {
         {
           model: TipoVenta,
           as: 'tipoVenta',
-          attributes: ['tipoVenta'],
+          attributes: ['tipoVenta', 'color'],
         },
         {
           model: Cambio,

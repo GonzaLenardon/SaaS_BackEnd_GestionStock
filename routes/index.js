@@ -20,6 +20,7 @@ const {
   getSucursal,
   updateSucursal,
   deleteSucursal,
+  toggleHabilitado,
 } = require('../controllers/sucursal');
 
 const {
@@ -157,6 +158,7 @@ router.post('/user/change-password', authMiddleware, changeMyPassword);
 // Sucursales
 router.get('/sucursal', authMiddleware, tenantMiddleware, allSucursal);
 router.post('/sucursal', authMiddleware, tenantMiddleware, addSucursal);
+router.put('/sucursal/habilitado/:id', authMiddleware, tenantMiddleware, toggleHabilitado);
 router.put('/sucursal/:id', authMiddleware, tenantMiddleware, updateSucursal);
 router.delete('/sucursal/:id', authMiddleware, tenantMiddleware, deleteSucursal);
 router.get('/sucursal/usuario/:id_usuario', authMiddleware, tenantMiddleware, getSucursal);
