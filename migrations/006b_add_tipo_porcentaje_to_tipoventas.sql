@@ -1,0 +1,1 @@
+ALTER TABLE tipoventa ADD COLUMN IF NOT EXISTS tipo_porcentaje VARCHAR(255) NOT NULL DEFAULT 'descuento';
