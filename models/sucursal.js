@@ -38,6 +38,11 @@ Sucursal.init(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    habilitado: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
   },
   {
     sequelize: db,

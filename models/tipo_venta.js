@@ -21,6 +21,11 @@ TipoVenta.init(
       type: S.FLOAT,
       allowNull: false,
     },
+    tipo_porcentaje: {
+      type: S.STRING,
+      allowNull: false,
+      defaultValue: 'descuento',
+    },
     habilitado: {
       type: S.BOOLEAN,
       allowNull: false,

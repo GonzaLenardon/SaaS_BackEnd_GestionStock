@@ -55,7 +55,7 @@ app.use('/', router);
 const startServer = async () => {
   try {
     if (process.env.NODE_ENV !== 'production') {
-      await sequelize.sync({ alter: true });
+      await sequelize.sync();
       console.log('📦 Base de datos sincronizada (dev).');
     } else {
       console.log('📦 Modo producción — sync deshabilitado.');

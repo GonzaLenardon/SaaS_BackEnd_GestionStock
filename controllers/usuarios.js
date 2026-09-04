@@ -37,7 +37,7 @@ const User = async (req, res) => {
 
 const upUser = async (req, res) => {
   try {
-    const { id_usuario, nombre, rol, id_sucursal, id_cliente } = req.body;
+    const { id_usuario, nombre, rol, id_sucursal, id_cliente, activo } = req.body;
 
     console.log('upUser body:', JSON.stringify(req.body));
     console.log('upUser id_cliente:', id_cliente, 'tipo:', typeof id_cliente);
@@ -61,6 +61,9 @@ const upUser = async (req, res) => {
 
     // Solo admin y superadmin pueden cambiar roles
     const updates = { nombre: nombre?.toLowerCase().trim(), id_sucursal };
+    if (activo !== undefined) {
+      updates.activo = activo;
+    }
     if (rol && (req.user.rol === 'admin' || req.user.rol === 'superadmin')) {
       if (req.user.rol === 'admin' && rol === 'superadmin') {
         return res.status(403).json({ message: 'No podés asignar rol de superadmin' });

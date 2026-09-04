@@ -18,7 +18,7 @@ const allSucursal = async (req, res) => {
 
 const addSucursal = async (req, res) => {
   try {
-    const { nombre, domicilio, localidad, provincia, contacto, celular, id_cliente: bodyClientId } = req.body;
+    const { nombre, domicilio, localidad, provincia, contacto, celular, habilitado, id_cliente: bodyClientId } = req.body;
     const targetClientId = req.user.rol === 'superadmin' && bodyClientId ? bodyClientId : req.id_cliente;
 
     const sucursalExistente = await Sucursal.findOne({
@@ -36,6 +36,7 @@ const addSucursal = async (req, res) => {
       provincia,
       contacto,
       celular,
+      habilitado: habilitado !== undefined ? habilitado : true,
       id_cliente: targetClientId,
     });
 
@@ -49,7 +50,7 @@ const addSucursal = async (req, res) => {
 const updateSucursal = async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, domicilio, localidad, provincia, contacto, celular } = req.body;
+    const { nombre, domicilio, localidad, provincia, contacto, celular, habilitado } = req.body;
 
     const where = req.user.rol === 'superadmin'
       ? { id_sucursal: id }
@@ -70,7 +71,12 @@ const updateSucursal = async (req, res) => {
       }
     }
 
-    await sucursal.update({ nombre, domicilio, localidad, provincia, contacto, celular });
+    const updates = { nombre, domicilio, localidad, provincia, contacto, celular };
+    if (habilitado !== undefined) {
+      updates.habilitado = habilitado;
+    }
+
+    await sucursal.update(updates);
 
     res.status(200).json({ message: 'Sucursal actualizada correctamente', sucursal });
   } catch (error) {
@@ -123,4 +129,31 @@ const getSucursal = async (req, res) => {
   }
 };
 
-module.exports = { addSucursal, allSucursal, getSucursal, updateSucursal, deleteSucursal };
+const toggleHabilitado = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { habilitado } = req.body;
+
+    const where = req.user.rol === 'superadmin'
+      ? { id_sucursal: id }
+      : { id_sucursal: id, id_cliente: req.id_cliente };
+
+    const sucursal = await Sucursal.findOne({ where });
+
+    if (!sucursal) {
+      return res.status(404).json({ message: 'Sucursal no encontrada' });
+    }
+
+    await sucursal.update({ habilitado });
+
+    res.status(200).json({
+      message: habilitado ? 'Sucursal habilitada' : 'Sucursal deshabilitada',
+      sucursal,
+    });
+  } catch (error) {
+    console.error('Error al cambiar estado de sucursal:', error);
+    res.status(500).json({ error: 'Error en el servidor' });
+  }
+};
+
+module.exports = { addSucursal, allSucursal, getSucursal, updateSucursal, deleteSucursal, toggleHabilitado };
