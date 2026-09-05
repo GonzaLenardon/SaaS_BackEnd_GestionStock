@@ -8,6 +8,7 @@ const {
 } = require('../models');
 const db = require('../db/conection');
 const { Op } = require('sequelize');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 /* const addCompra = async (req, res) => {
   const { monto, proveedor_id, numero, detalles } = req.body;
@@ -113,8 +114,10 @@ const addCompra = async (req, res) => {
   try {
     const fecha = fechaActual();
 
+    const correlativoCompra = await getNextCorrelative(req.id_cliente, 'compra', t);
+
     const nuevaCompra = await Compra.create(
-      { fecha, monto, numero, id_usuario, proveedor_id, id_cliente: req.id_cliente },
+      { fecha, monto, numero, id_usuario, proveedor_id, id_cliente: req.id_cliente, correlativo: correlativoCompra },
       { transaction: t }
     );
 

@@ -2,6 +2,7 @@ const { Usuarios, Sucursal, Clientes } = require('../models');
 const { validateToken, generateToken } = require('../config/token');
 const jwt = require('jsonwebtoken');
 const bc = require('bcrypt');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const allUsers = async (req, res) => {
   try {
@@ -123,6 +124,7 @@ const addUser = async (req, res) => {
       rol,
       id_sucursal,
       id_cliente: req.id_cliente,
+      correlativo: await getNextCorrelative(req.id_cliente, 'usuarios'),
     });
     const { password: _, salt: __, ...safeUser } = newUser.toJSON();
     res.status(201).json({ message: 'Usuario creado exitosamente', newUser: safeUser });
@@ -180,6 +182,7 @@ const addUserAsSuperadmin = async (req, res) => {
       rol,
       id_sucursal: id_sucursal || null,
       id_cliente,
+      correlativo: await getNextCorrelative(id_cliente, 'usuarios'),
     });
 
     const { password: _, salt: __, ...safeUser } = newUser.toJSON();

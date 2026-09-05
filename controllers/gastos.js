@@ -1,5 +1,6 @@
 const { Gastos, TipoGastos, Sucursal } = require('../models');
 const { fn, col, where: sqWhere, Op } = require('sequelize');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const allGastos = async (req, res) => {
   try {
@@ -31,6 +32,8 @@ const addGastos = async (req, res) => {
   try {
     const { fecha, monto, observaciones, id_tipogasto, id_sucursal } = req.body;
 
+    const correlativo = await getNextCorrelative(req.id_cliente, 'gastos');
+
     const newGasto = await Gastos.create({
       fecha,
       monto,
@@ -38,6 +41,7 @@ const addGastos = async (req, res) => {
       id_tipogasto: parseInt(id_tipogasto),
       id_sucursal: parseInt(id_sucursal),
       id_cliente: req.id_cliente,
+      correlativo,
     });
     res.status(201).json({
       message: 'Gasto creado exitosamente',

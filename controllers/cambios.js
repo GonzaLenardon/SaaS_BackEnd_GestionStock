@@ -10,6 +10,7 @@ const {
 } = require('../models');
 const db = require('../db/conection');
 const { Op } = require('sequelize');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 /* const registrarCambioProducto = async (req, res) => {
   const {
@@ -642,6 +643,8 @@ const registrarCambioProducto = async (req, res) => {
           id_usuario,
           porcentaje_aplicado: 0,
           monto_descuento: 0,
+          id_cliente: req.id_cliente,
+          correlativo: await getNextCorrelative(req.id_cliente, 'ventas', t),
         },
         { transaction: t },
       );
@@ -674,6 +677,8 @@ const registrarCambioProducto = async (req, res) => {
         id_venta_original,
         id_venta_diferencia, // puede ser null si no hay diferencia
         observaciones,
+        id_cliente: req.id_cliente,
+        correlativo: await getNextCorrelative(req.id_cliente, 'cambio', t),
       },
       { transaction: t },
     );

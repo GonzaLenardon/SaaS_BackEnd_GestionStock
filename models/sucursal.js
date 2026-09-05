@@ -43,6 +43,11 @@ Sucursal.init(
       allowNull: false,
       defaultValue: true,
     },
+    correlativo: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Numero correlativo per-tenant para display',
+    },
   },
   {
     sequelize: db,

@@ -30,6 +30,11 @@ Compra.init(
       type: DataTypes.INTEGER,
       allowNull: true,
     },
+    correlativo: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: 'Numero correlativo per-tenant para display',
+    },
   },
   { sequelize: db, modelName: 'compra' }
 );

@@ -52,6 +52,11 @@ Usuarios.init(
       allowNull: false,
       defaultValue: true,
     },
+    correlativo: {
+      type: S.INTEGER,
+      allowNull: true,
+      comment: 'Numero correlativo per-tenant para display',
+    },
   },
 
   {

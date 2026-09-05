@@ -68,6 +68,11 @@ Productos.init(
       type: S.INTEGER,
       allowNull: true,
     },
+    correlativo: {
+      type: S.INTEGER,
+      allowNull: true,
+      comment: 'Numero correlativo per-tenant para display',
+    },
     activo: {
       type: S.BOOLEAN,
       allowNull: false,

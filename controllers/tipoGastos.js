@@ -1,4 +1,5 @@
 const { TipoGastos } = require('../models');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const allTipoGastos = async (req, res) => {
   try {
@@ -29,6 +30,7 @@ const addTipoGastos = async (req, res) => {
     const newTipoGasto = await TipoGastos.create({
       tipoGasto,
       id_cliente: req.id_cliente,
+      correlativo: await getNextCorrelative(req.id_cliente, 'tipoGastos'),
     });
 
     res.status(201).json({

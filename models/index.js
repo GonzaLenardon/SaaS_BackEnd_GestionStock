@@ -18,6 +18,7 @@ const AjusteStock = require('./ajusteStock');
 const AjusteStockDetalle = require('./ajusteStockDetalles');
 const Clientes = require('./clientes');
 const ClienteConfig = require('./clienteConfig');
+const Correlativo = require('./correlativo');
 
 // Relación: Una venta tiene muchos detalles de venta
 
@@ -296,4 +297,5 @@ module.exports = {
   AjusteStockDetalle,
   Clientes,
   ClienteConfig,
+  Correlativo,
 };

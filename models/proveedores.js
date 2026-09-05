@@ -30,6 +30,11 @@ Proveedores.init(
     },
     email: { type: S.STRING, allowNull: true },
     id_cliente: { type: S.INTEGER, allowNull: true },
+    correlativo: {
+      type: S.INTEGER,
+      allowNull: true,
+      comment: 'Numero correlativo per-tenant para display',
+    },
   },
   {
     sequelize: db,

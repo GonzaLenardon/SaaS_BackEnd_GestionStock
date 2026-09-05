@@ -9,8 +9,8 @@ const {
 const sequelize = require('../db/conection.js');
 
 const { generarCodigo } = require('../utils/generarCodigo.js');
-
 const { fechaActual } = require('../utils/fechaHelper');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const addProductos = async (req, res) => {
   try {
@@ -33,6 +33,8 @@ const addProductos = async (req, res) => {
 
     const fecha = fechaActual();
 
+    const correlativo = await getNextCorrelative(req.id_cliente, 'productos');
+
     const newProd = await Productos.create({
       codigo,
       nombre,
@@ -47,6 +49,7 @@ const addProductos = async (req, res) => {
       createdAt: fecha,
       updatedAt: fecha,
       id_cliente: req.id_cliente,
+      correlativo,
     });
 
     const id = newProd.id_producto;

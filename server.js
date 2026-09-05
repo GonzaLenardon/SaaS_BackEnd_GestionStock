@@ -14,6 +14,7 @@ app.use(fileUpload({
 const PORT = process.env.PORT || 3000;
 const ventas = require('./models/ventas');
 const DetalleVentas = require('./models/detalleVentas');
+const Correlativo = require('./models/correlativo');
 
 /* Al leer ./routes se cargan todos los modelos definidos aca. De lo contrario hay que instanciarlos aca */
 const router = require('./routes');
