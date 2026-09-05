@@ -20,6 +20,11 @@ StockSucursal.init(
       type: S.INTEGER,
       allowNull: true,
     },
+    correlativo: {
+      type: S.INTEGER,
+      allowNull: true,
+      comment: 'Numero correlativo per-tenant para display',
+    },
   },
   {
     sequelize: db,

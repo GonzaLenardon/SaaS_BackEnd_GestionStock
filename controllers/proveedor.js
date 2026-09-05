@@ -1,4 +1,5 @@
 const { Proveedores } = require('../models');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const addProveedor = async (req, res) => {
   try {
@@ -12,6 +13,8 @@ const addProveedor = async (req, res) => {
       return res.status(400).json({ message: '¡Proveedor ya existente!' });
     }
 
+    const correlativo = await getNextCorrelative(req.id_cliente, 'proveedores');
+
     const newProveedor = await Proveedores.create({
       nombre,
       direccion,
@@ -19,6 +22,7 @@ const addProveedor = async (req, res) => {
       email,
       contacto,
       id_cliente: req.id_cliente,
+      correlativo,
     });
     res
       .status(201)

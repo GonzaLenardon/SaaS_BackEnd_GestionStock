@@ -1,4 +1,5 @@
 const { Sucursal, Usuarios, Clientes } = require('../models');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const allSucursal = async (req, res) => {
   try {
@@ -38,6 +39,7 @@ const addSucursal = async (req, res) => {
       celular,
       habilitado: habilitado !== undefined ? habilitado : true,
       id_cliente: targetClientId,
+      correlativo: await getNextCorrelative(targetClientId, 'sucursal'),
     });
 
     res.status(201).json({ message: 'Sucursal creada exitosamente', newSucursal });

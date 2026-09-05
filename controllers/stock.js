@@ -13,6 +13,7 @@ const {
 } = require('../models');
 const db = require('../db/conection');
 const { fechaActual } = require('../utils/fechaHelper');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 /* const verStock = async (req, res) => {
   const idSucursal = req.params.sucursal;
@@ -218,6 +219,7 @@ const transferirStock = async (req, res) => {
         fecha: fecha,
         id_usuario: id_usuario,
         id_cliente: req.id_cliente,
+        correlativo: await getNextCorrelative(req.id_cliente, 'transferencia', t),
       },
       { transaction: t },
     );
@@ -256,6 +258,7 @@ const crearAjusteStock = async (req, res) => {
         motivo,
         observaciones,
         id_cliente: req.id_cliente,
+        correlativo: await getNextCorrelative(req.id_cliente, 'ajuste_stock', t),
       },
       { transaction: t },
     );

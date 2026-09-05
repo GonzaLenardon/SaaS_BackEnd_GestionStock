@@ -12,6 +12,7 @@ const {
 } = require('../models');
 const db = require('../db/conection');
 const { fn, col, where, Op } = require('sequelize');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const allVentas = async (req, res) => {
   const fecha = fechaActual();
@@ -582,6 +583,8 @@ const registrarVenta = async (req, res) => {
     const montoDescuento = (totalBruto * porcentaje_aplicado) / 100;
     const totalFinal = totalBruto - montoDescuento;
 
+    const correlativoVenta = await getNextCorrelative(req.id_cliente, 'ventas', t);
+
     const venta = await Ventas.create(
       {
         fecha,
@@ -592,6 +595,7 @@ const registrarVenta = async (req, res) => {
         id_sucursal,
         id_tipo_venta: id_tipo_venta,
         id_cliente: req.id_cliente,
+        correlativo: correlativoVenta,
       },
       { transaction: t },
     );

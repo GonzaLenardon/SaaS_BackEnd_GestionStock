@@ -1,4 +1,5 @@
 const { TipoVenta } = require('../models');
+const { getNextCorrelative } = require('../utils/correlativo');
 
 const allTipoVentas = async (req, res) => {
   try {
@@ -23,6 +24,8 @@ const addTipoVenta = async (req, res) => {
       return res.status(400).json({ message: '¡Tipo de Venta ya existente!' });
     }
 
+    const correlativo = await getNextCorrelative(req.id_cliente, 'tipoventa');
+
     const newTipoVenta = await TipoVenta.create({
       tipoVenta,
       porcentajeVenta,
@@ -30,6 +33,7 @@ const addTipoVenta = async (req, res) => {
       habilitado,
       color: color || '#FF6B9D',
       id_cliente: req.id_cliente,
+      correlativo,
     });
 
     res.status(201).json({
