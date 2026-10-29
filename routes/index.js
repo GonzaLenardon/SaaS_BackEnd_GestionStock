@@ -85,6 +85,7 @@ const {
   resumenDesdeHasta,
   resumenVentasDesdeHasta,
   ventasPorSucursales,
+  capitalStock,
 } = require('../controllers/listados');
 const {
   verStock,
@@ -221,9 +222,10 @@ router.post('/listados/ajustesStock/desdehasta', authMiddleware, tenantMiddlewar
 router.post('/cambio', authMiddleware, tenantMiddleware, registrarCambioProducto);
 
 // Listados
-router.post('/listados/:sucursal', authMiddleware, tenantMiddleware, resumenVentas);
 router.post('/listados/ventas/resumen', authMiddleware, tenantMiddleware, resumenVentasDesdeHasta);
 router.post('/listados/ventas/sucursales', authMiddleware, tenantMiddleware, ventasPorSucursales);
+router.post('/listados/capital', authMiddleware, tenantMiddleware, capitalStock);
+router.post('/listados/:sucursal', authMiddleware, tenantMiddleware, resumenVentas);
 
 // Admin - Rollback
 router.post('/admin/rollback-cambio/:id', authMiddleware, tenantMiddleware, requireRole('admin', 'superadmin'), async (req, res) => {

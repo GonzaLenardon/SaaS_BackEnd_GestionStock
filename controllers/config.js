@@ -8,6 +8,10 @@ const DEFAULT_CONFIG = {
   permitir_stock_negativo: 'false',
   formato_fecha: 'DD/MM/YYYY',
   timezone: 'America/Argentina/Buenos_Aires',
+  modo_vista_productos: 'seleccion',
+  imprimir_precio_etiqueta: 'false',
+  tipo_venta_precio_etiqueta: '',
+  margen_impresora_etiqueta: '4',
 };
 
 // Campos que se almacenan en la tabla clientes (no en key-value)
