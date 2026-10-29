@@ -1,8 +1,8 @@
 ﻿const fs = require('fs');
 const path = require('path');
 
-const INPUT_FILE = 'C:\\Users\\gfleo\\Downloads\\amor_up.sql';
-const OUTPUT_FILE = path.join(__dirname, '..', 'migrations', '007_migrate_amor_data.sql');
+const INPUT_FILE = 'C:\\Users\\gfleo\\Downloads\\AMOR.sql';
+const OUTPUT_FILE = path.join(__dirname, '..', 'migrations', '008_migrate_amor_data.sql');
 const ID_CLIENTE = 1;
 
 const TABLE_COLUMNS = {

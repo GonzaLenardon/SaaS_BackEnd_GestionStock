@@ -1,5 +1,28 @@
 # CHANGELOG
 
+2026-10-28 - 13:40 - [FE] Etiquetas: nuevo setting margen_impresora_etiqueta (default 4mm) para compensar el margen no imprimible de la impresora. El barcode ahora se dibuja dentro del AREA IMPRIMIBLE (no centrado en la etiqueta) con ancho adaptativo para no bajar del minimo ISO 0.264mm. Se agrega boton "Etiqueta de prueba" para medir el margen real de la impresora
+2026-10-28 - 13:05 - [FIX FE] Etiquetas: barcode pasa de PNG rasterizado deformado a render VECTORIAL (doc.rect). El estirado a 40x14mm comprimia los modulos a 0.209mm (bajo el minimo ISO 0.264mm) y las barras quedaban en 5.76mm de alto, por eso el scanner fallaba al imprimir precio. Nuevo util src/utils/barcode.js + nueva geometria 50x25mm (detalle arriba, barcode al medio 46x11.4mm, precios abajo) y formato de precio "Lista $X / Efec. $Y"
+2026-09-11 - 12:34 - [DOC] Creado docs/LOGIN_FLOW.md: flujo de login con composicion dominio.usuario, validaciones del backend, cadena de middlewares (authMiddleware -> tenantMiddleware -> requireRole) y asignacion Clientes/Sucursales/Usuarios
+2026-09-08 - 19:56 - [FE] CapitalStock.jsx: cards de resumen por sucursal + total general arriba, detalle de tablas abajo con flex-wrap (flex: 1 1 300px) y ToastContainer con autoClose=1000
+2026-09-08 - 19:55 - [FE] autoClose de ToastContainer unificado a 1000ms en 13 archivos (AjusteStock, ListadoAjusteStock, Clientes, ComprasVentasProducto, CambioProducto, Configuracion, Gastos, Toast, Sucursales, TipoGastos, TipoVentas, User, CapitalStock)
+2026-09-08 - 19:46 - [FE] Productos.jsx: modo de vista configurable (seleccion con checkboxes + action bar / acciones_visibles con botones inline Editar-Imprimir-Stock)
+2026-09-08 - 10:20 - [FIX] Navbar: preventDefault en dropdowns Config/Listados, permiso perm_listado_capital_stock en la visibilidad del menu Listados, .navbar-collapse.show con overflow-y auto
+2026-09-08 - 10:16 - [FIX] capitalStock: corregido calculo de capital usando p.costo (productos) en lugar de dc.costo (detallecompras, siempre 1); eliminada query de debug del API
+2026-09-08 - 09:53 - [FIX] routes/index.js: movidas rutas especificas de listados (/listados/ventas/resumen, /listados/ventas/sucursales, /listados/capital) ANTES de la ruta generica /listados/:sucursal que las interceptaba
+2026-09-08 - 09:30 - [FE] ImprimirProd.jsx: etiqueta con formato fijo 50x25mm, barcode 14mm, descripcion 5pt, precios 6pt en linea unica
+2026-09-07 - 18:30 - [FE] TenantContext.jsx: expone modoVistaProductos, imprimirPrecioEtiqueta, tipoVentaPrecioEtiqueta y permiso perm_listado_capital_stock; App.jsx registra la ruta /listado/capital
+2026-09-07 - 18:23 - [BE] config.js: nuevos settings modo_vista_productos, imprimir_precio_etiqueta y tipo_venta_precio_etiqueta; FE ModalSeleccionProductoAjuste.jsx muestra marca, modelo y codigo del producto con badges
+2026-09-07 - 17:30 - [BE] server.js: sequelize.sync() activo solo en desarrollo
+2026-09-07 - 16:47 - [BE] migrations/008_migrate_amor_data.sql: datos del cliente Amor Infinito migrados desde PostgreSQL (3 sucursales, 6 usuarios, 15 proveedores, 719 productos)
+2026-09-06 - 21:39 - [FE] ViewDetallesVenta.jsx: overflow-x hidden en el modal y mb-0 removido de la tabla
+2026-09-06 - 21:14 - [FE] VentasResumen.jsx: columnas Ventas/Total con anchos fijos y alineacion a la derecha; VentasPorSucursales.jsx con columnas dinamicas segun cantidad de sucursales
+2026-09-06 - 21:10 - [FE] ModalTransferencia.jsx: filtra por sucursales habilitadas
+2026-09-06 - 20:08 - [BE] scripts/convert-pg-to-mariadb.js: conversor del dump PostgreSQL AMOR.sql a INSERTs de MariaDB para la migracion 008
+2026-09-05 - 11:00 - [BE] Sistema de correlativos per-tenant: nuevo models/correlativo.js y utils/correlativo.js (getNextCorrelative con transaccion y findOrCreate); campo correlativo agregado a 18 modelos y asignado en 11 controllers (ventas, compras, productos, proveedores, sucursales, usuarios, gastos, tipos, transferencias, cambios, ajustes)
+2026-09-03 - 23:54 - [FE] Home.jsx y TablaProductos.jsx actualizados con sucursales dinamicas
+2026-09-01 - 10:24 - [BE] db/conection.js: dialect cambiado de postgres a mysql (MariaDB); agregados scripts/setup-db.js, run-migration.js y crear-admin.js; .gitignore en backend y frontend
+2026-08-30 - 03:19 - [FE] Consolidacion del sistema de diseno: variables.css y utilities.css creados, estilos legacy migrados en modales y paginas de listados (Ventas, Compras, Proveedores, Compras/Gastos resumen, Productos PDF)
+2026-08-29 - 21:10 - [FE] Ventas.jsx y BuscarProducto.jsx actualizados
 2026-08-26 - [UX] Cascada de permisos: deshabilitar menu padre deshabilita sub-items (Config/Listados) en UI y en guardado
 2026-08-26 - [FIX] Permisos de empleados: todas las rutas ahora usan permission prop en vez de adminOnly, Nav.jsx con sub-items individuales granulares para Config y Listados
 2026-08-26 - [FASE A+B] Soft Delete de Productos (activo/inactivo) + Sistema de Permisos de Empleados (17 perm keys en TenantContext, Nav.jsx filtrado, ProtectedRoute permission prop, Configuracion.jsx toggles, Productos.jsx granular)

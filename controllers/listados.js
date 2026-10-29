@@ -7,20 +7,20 @@ const {
   DetalleCambio,
 } = require('../models');
 const { fn, col, where: sqWhere, Op } = require('sequelize');
+const sequelize = require('../db/conection');
 
 const resumenVentas = async (req, res) => {
   try {
     const id_sucursal = req.params.sucursal;
 
-    // Empleado solo puede ver su propia sucursal
     if (req.user.rol === 'empleado' && String(id_sucursal) !== String(req.user.id_sucursal)) {
       return res.status(403).json({ error: 'No tenés acceso a esa sucursal' });
     }
 
     const { desde, hasta } = req.body;
 
-    const desdeFecha = `${desde}T00:00:00.000Z`;
-    const hastaFecha = `${hasta}T23:59:59.999Z`;
+    const desdeFecha = new Date(desde + 'T00:00:00');
+    const hastaFecha = new Date(hasta + 'T23:59:59');
 
     const whereClause = {
       [Op.and]: [
@@ -37,7 +37,6 @@ const resumenVentas = async (req, res) => {
       attributes: [
         'id_tipo_venta',
         'id_sucursal',
-
         [fn('SUM', col('total')), 'suma_total'],
         [fn('COUNT', col('id_venta')), 'transacciones'],
       ],
@@ -48,9 +47,7 @@ const resumenVentas = async (req, res) => {
           attributes: ['tipoVenta', 'color'],
         },
       ],
-
       where: whereClause,
-
       group: ['id_tipo_venta', 'tipoVenta.id_tipo', 'id_sucursal'],
       order: ['id_tipo_venta'],
     });
@@ -65,7 +62,7 @@ const resumenVentas = async (req, res) => {
 
     return res.status(200).json(data);
   } catch (error) {
-    console.error('❌ Error en resumenVentas:', error);
+    console.error('Error en resumenVentas:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -78,8 +75,8 @@ const ventasPorSucursales = async (req, res) => {
       return res.status(400).json({ error: 'Faltan fechas desde o hasta' });
     }
 
-    const desdeFecha = `${desde}T00:00:00.000Z`;
-    const hastaFecha = `${hasta}T23:59:59.999Z`;
+    const desdeFecha = new Date(desde + 'T00:00:00');
+    const hastaFecha = new Date(hasta + 'T23:59:59');
 
     const whereClause = {
       fecha: {
@@ -107,23 +104,15 @@ const ventasPorSucursales = async (req, res) => {
 
     const resumenPorSucursal = {};
 
-    console.log('Ventitas ', ventas);
     for (const venta of ventas) {
       const idSucursal = venta.id_sucursal;
-
-      const tipoVentaNombre =
-        venta.tipoVenta?.tipoVenta?.replace(/\s/g, '_') || 'otro';
-
-      // Para rendición de caja usamos exclusivamente
-      // el importe registrado en la venta.
+      const tipoVentaNombre = venta.tipoVenta?.tipoVenta?.replace(/\s/g, '_') || 'otro';
       const totalFinal = Number(venta.total);
 
-      // Inicializar sucursal si no existe
       if (!resumenPorSucursal[idSucursal]) {
         resumenPorSucursal[idSucursal] = {};
       }
 
-      // Inicializar tipo de venta si no existe
       if (!resumenPorSucursal[idSucursal][tipoVentaNombre]) {
         resumenPorSucursal[idSucursal][tipoVentaNombre] = {
           id_tipo_venta: venta.tipoVenta.id_tipo,
@@ -134,7 +123,6 @@ const ventasPorSucursales = async (req, res) => {
         };
       }
 
-      // Acumular total y contador
       resumenPorSucursal[idSucursal][tipoVentaNombre].total += totalFinal;
       resumenPorSucursal[idSucursal][tipoVentaNombre].transacciones += 1;
     }
@@ -148,7 +136,7 @@ const ventasPorSucursales = async (req, res) => {
 
     return res.status(200).json(resultadoFinal);
   } catch (error) {
-    console.error('Error en resumenVentas:', error);
+    console.error('Error en ventasPorSucursales:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -161,8 +149,8 @@ const resumenVentasDesdeHasta = async (req, res) => {
       return res.status(400).json({ error: 'Faltan fechas desde o hasta' });
     }
 
-    const desdeFecha = `${desde}T00:00:00.000Z`;
-    const hastaFecha = `${hasta}T23:59:59.999Z`;
+    const desdeFecha = new Date(desde + 'T00:00:00');
+    const hastaFecha = new Date(hasta + 'T23:59:59');
 
     const whereClause = {
       fecha: {
@@ -198,21 +186,16 @@ const resumenVentasDesdeHasta = async (req, res) => {
     for (const venta of ventas) {
       const idTipoVenta = venta.id_tipo_venta;
       const tipoVentaNombre = venta.tipoVenta?.tipoVenta || 'Sin nombre';
-
-      // ✅ usamos el total de la tabla Ventas, no recalculamos desde detalles
       const totalVenta = Number(venta.total);
 
       let totalDevuelve = 0;
       let totalRecibe = 0;
-
-      console.log('ventasDetalles', venta.ventacambio);
 
       if (Array.isArray(venta.ventacambio)) {
         for (const cambio of venta.ventacambio) {
           if (Array.isArray(cambio.cambiodetalles)) {
             for (const det of cambio.cambiodetalles) {
               const subtotal = Number(det.precio_unitario) * det.cantidad;
-
               if (det.tipo === 'devuelve') {
                 totalDevuelve += subtotal;
               } else if (det.tipo === 'recibe') {
@@ -251,7 +234,80 @@ const resumenVentasDesdeHasta = async (req, res) => {
 
     return res.status(200).json(data);
   } catch (error) {
-    console.error('Error en resumenVentas:', error);
+    console.error('Error en resumenVentasDesdeHasta:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+const capitalStock = async (req, res) => {
+  try {
+    const idCliente = req.user.rol === 'superadmin' ? (req.body.id_cliente || null) : req.id_cliente;
+
+    if (!idCliente && req.user.rol !== 'superadmin') {
+      return res.status(400).json({ error: 'Falta id_cliente' });
+    }
+
+    const whereCliente = idCliente ? 'AND su.id_cliente = :idCliente' : '';
+
+    const detalles = await sequelize.query(`
+      SELECT
+        ss.id_sucursal,
+        su.nombre AS sucursal,
+        p.id_producto,
+        p.nombre,
+        p.marca,
+        p.codigo,
+        SUM(ss.stock) AS stock,
+        ROUND(SUM(ss.stock * p.costo), 2) AS capital
+      FROM stock_sucursal ss
+        INNER JOIN detallecompras dc ON ss.id_detalle_compra = dc.id_detalle
+        INNER JOIN productos p ON dc.producto_id = p.id_producto
+        INNER JOIN sucursales su ON ss.id_sucursal = su.id_sucursal
+      WHERE ss.stock > 0
+        AND p.activo = 1
+        ${whereCliente}
+      GROUP BY ss.id_sucursal, p.id_producto
+      ORDER BY su.nombre, capital DESC
+    `, {
+      replacements: { idCliente },
+      type: sequelize.QueryTypes.SELECT,
+    });
+
+    const resumenPorSucursal = {};
+    let totalProductosConStock = 0;
+    let totalCapital = 0;
+
+    for (const row of detalles) {
+      if (!resumenPorSucursal[row.id_sucursal]) {
+        resumenPorSucursal[row.id_sucursal] = {
+          id_sucursal: row.id_sucursal,
+          sucursal: row.sucursal,
+          productos: [],
+          totalProductos: 0,
+          totalCapital: 0,
+        };
+      }
+      resumenPorSucursal[row.id_sucursal].productos.push({
+        id_producto: row.id_producto,
+        nombre: row.nombre,
+        marca: row.marca,
+        codigo: row.codigo,
+        stock: parseInt(row.stock),
+        capital: parseFloat(row.capital),
+      });
+      resumenPorSucursal[row.id_sucursal].totalProductos += 1;
+      resumenPorSucursal[row.id_sucursal].totalCapital += parseFloat(row.capital);
+      totalProductosConStock += 1;
+      totalCapital += parseFloat(row.capital);
+    }
+
+    return res.status(200).json({
+      sucursales: Object.values(resumenPorSucursal),
+      totalProductosConStock,
+      totalCapital: parseFloat(totalCapital.toFixed(2)),
+    });
+  } catch (error) {
+    console.error('Error en capitalStock:', error);
     return res.status(500).json({ error: error.message });
   }
 };
@@ -260,4 +316,5 @@ module.exports = {
   resumenVentas,
   resumenVentasDesdeHasta,
   ventasPorSucursales,
+  capitalStock,
 };
