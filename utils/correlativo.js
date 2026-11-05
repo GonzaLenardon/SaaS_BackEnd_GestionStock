@@ -15,11 +15,26 @@ async function getNextCorrelative(id_cliente, entityType, transaction = null) {
   const t = transaction || await db.transaction();
 
   try {
-    const [correlativo] = await Correlativo.findOrCreate({
+    // Se asegura que exista la fila del correlativo para el tenant.
+    await Correlativo.findOrCreate({
       where: { id_cliente, entity_type: entityType },
       defaults: { id_cliente, entity_type: entityType, last_number: 0 },
       transaction: t,
     });
+
+    // Se relee la fila con FOR UPDATE: el lock se mantiene hasta el commit,
+    // asi dos requests concurrentes no leen el mismo last_number.
+    const correlativo = await Correlativo.findOne({
+      where: { id_cliente, entity_type: entityType },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    if (!correlativo) {
+      throw new Error(
+        `No se pudo obtener el correlativo de "${entityType}" para el cliente ${id_cliente}`,
+      );
+    }
 
     correlativo.last_number += 1;
     await correlativo.save({ transaction: t });

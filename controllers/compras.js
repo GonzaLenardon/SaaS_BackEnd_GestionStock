@@ -9,6 +9,7 @@ const {
 const db = require('../db/conection');
 const { Op } = require('sequelize');
 const { getNextCorrelative } = require('../utils/correlativo');
+const { validarTenantCompra } = require('../utils/validarTenant');
 
 /* const addCompra = async (req, res) => {
   const { monto, proveedor_id, numero, detalles } = req.body;
@@ -112,6 +113,15 @@ const addCompra = async (req, res) => {
 
   const t = await db.transaction();
   try {
+    // Se valida que los productos y las sucursales pertenezcan al tenant
+    // antes de tocar nada, para no cargar stock de otro cliente.
+    const validacion = await validarTenantCompra(detalles, req.id_cliente, t);
+
+    if (!validacion.ok) {
+      await t.rollback();
+      return res.status(400).json({ error: validacion.mensaje });
+    }
+
     const fecha = fechaActual();
 
     const correlativoCompra = await getNextCorrelative(req.id_cliente, 'compra', t);
@@ -142,10 +152,10 @@ const addCompra = async (req, res) => {
     // Armar los registros de stock por sucursal
     const stockData = [];
 
-    for (const detalle of detalles) {
-      const detalleInsertado = detallesInsertados.find(
-        (d) => d.producto_id === detalle.producto_id
-      );
+    for (const [indice, detalle] of detalles.entries()) {
+      // Se usa el indice y no un find por producto_id: si el mismo producto
+      // aparece dos veces, cada fila usa su propio lote.
+      const detalleInsertado = detallesInsertados[indice];
 
       if (!detalleInsertado) continue;
 

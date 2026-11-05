@@ -4,6 +4,27 @@ const jwt = require('jsonwebtoken');
 const bc = require('bcrypt');
 const { getNextCorrelative } = require('../utils/correlativo');
 
+/**
+ * Valida que un usuario que opera (admin o empleado) tenga una sucursal
+ * asignada. La venta se registra siempre en la sucursal del usuario, asi que
+ * un usuario sin sucursal no puede vender.
+ *
+ * El superadmin no tiene sucursal: administra todos los clientes.
+ *
+ * @param {string} rol
+ * @param {number|string|null} id_sucursal
+ * @returns {string|null} mensaje de error o null si esta bien
+ */
+const validarSucursalDeUsuario = (rol, id_sucursal) => {
+  if (rol === 'superadmin') return null;
+
+  if (id_sucursal === undefined || id_sucursal === null || id_sucursal === '') {
+    return 'Los usuarios admin y empleado necesitan una sucursal asignada';
+  }
+
+  return null;
+};
+
 const allUsers = async (req, res) => {
   try {
     const where = req.user.rol === 'superadmin'
@@ -61,7 +82,13 @@ const upUser = async (req, res) => {
     }
 
     // Solo admin y superadmin pueden cambiar roles
-    const updates = { nombre: nombre?.toLowerCase().trim(), id_sucursal };
+    const updates = { nombre: nombre?.toLowerCase().trim() };
+
+    // Si la sucursal no viene en el body se conserva la del usuario.
+    if (id_sucursal !== undefined) {
+      updates.id_sucursal = id_sucursal;
+    }
+
     if (activo !== undefined) {
       updates.activo = activo;
     }
@@ -73,6 +100,23 @@ const upUser = async (req, res) => {
         return res.status(403).json({ message: 'No podés cambiar tu propio rol' });
       }
       updates.rol = rol;
+    }
+
+    // El rol efectivo es el nuevo si se cambia, o el actual.
+    const rolEfectivo = updates.rol || user.rol;
+    const sucursalEfectiva =
+      updates.id_sucursal !== undefined ? updates.id_sucursal : user.id_sucursal;
+
+    // Los usuarios que operan (admin y empleado) necesitan una sucursal fija:
+    // la venta se registra en la sucursal del usuario.
+    const errorSucursal = validarSucursalDeUsuario(rolEfectivo, sucursalEfectiva);
+
+    if (errorSucursal) {
+      return res.status(400).json({ message: errorSucursal });
+    }
+
+    if (rolEfectivo === 'superadmin') {
+      updates.id_sucursal = null;
     }
 
     // Solo superadmin puede cambiar el cliente del usuario
@@ -110,6 +154,14 @@ const addUser = async (req, res) => {
       return res.status(400).json({ message: 'La contraseña es requerida (mínimo 6 caracteres)' });
     }
 
+    // Los usuarios que operan (admin y empleado) necesitan una sucursal fija:
+    // la venta se registra en la sucursal del usuario.
+    const errorSucursal = validarSucursalDeUsuario(rol, id_sucursal);
+
+    if (errorSucursal) {
+      return res.status(400).json({ message: errorSucursal });
+    }
+
     const user = await Usuarios.findOne({
       where: { nombre, id_cliente: req.id_cliente },
     });
@@ -122,7 +174,7 @@ const addUser = async (req, res) => {
       nombre,
       password,
       rol,
-      id_sucursal,
+      id_sucursal: rol === 'superadmin' ? null : id_sucursal,
       id_cliente: req.id_cliente,
       correlativo: await getNextCorrelative(req.id_cliente, 'usuarios'),
     });
@@ -162,6 +214,13 @@ const addUserAsSuperadmin = async (req, res) => {
       return res.status(400).json({ message: 'rol es requerido' });
     }
 
+    // Los usuarios que operan (admin y empleado) necesitan una sucursal fija.
+    const errorSucursal = validarSucursalDeUsuario(rol, id_sucursal);
+
+    if (errorSucursal) {
+      return res.status(400).json({ message: errorSucursal });
+    }
+
     // Verificar que el cliente exista
     const cliente = await Clientes.findByPk(id_cliente);
     if (!cliente) {
@@ -180,7 +239,7 @@ const addUserAsSuperadmin = async (req, res) => {
       nombre,
       password,
       rol,
-      id_sucursal: id_sucursal || null,
+      id_sucursal: rol === 'superadmin' ? null : id_sucursal,
       id_cliente,
       correlativo: await getNextCorrelative(id_cliente, 'usuarios'),
     });
@@ -217,13 +276,25 @@ const login = async (req, res) => {
 
     let id_cliente = null;
     let clienteBranding = null;
+    let cliente = null;
+
+    const ATRIBUTOS_CLIENTE = [
+      'id_cliente',
+      'razon_social',
+      'logo_url',
+      'color_primario',
+      'color_secundario',
+      'color_terciario',
+      'color_fondo',
+      'activo',
+    ];
 
     if (clienteSlug) {
       // Buscar cliente por dominio o razon_social
       const { Op } = require('sequelize');
-      let cliente = await Clientes.findOne({
+      cliente = await Clientes.findOne({
         where: { dominio: clienteSlug, activo: true },
-        attributes: ['id_cliente', 'razon_social', 'logo_url', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo'],
+        attributes: ATRIBUTOS_CLIENTE,
       });
 
       if (!cliente) {
@@ -232,7 +303,7 @@ const login = async (req, res) => {
             razon_social: { [Op.iLike]: `%${clienteSlug}%` },
             activo: true,
           },
-          attributes: ['id_cliente', 'razon_social', 'logo_url', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo'],
+          attributes: ATRIBUTOS_CLIENTE,
         });
       }
 
@@ -257,7 +328,16 @@ const login = async (req, res) => {
       whereClause.id_cliente = id_cliente;
     }
 
-    const user = await Usuarios.findOne({ where: whereClause });
+    let user = await Usuarios.findOne({ where: whereClause });
+
+    // El superadmin no pertenece a ningun tenant: si se busco con un slug,
+    // se lo busca sin filtro de tenant.
+    if (!user && id_cliente) {
+      user = await Usuarios.findOne({
+        where: { nombre: userName, activo: true, rol: 'superadmin' },
+      });
+    }
+
     if (!user)
       return res.status(401).json({ mensaje: 'Credenciales inválidas' });
 
@@ -266,6 +346,48 @@ const login = async (req, res) => {
     if (!isValid)
       return res.status(401).json({ mensaje: 'Credenciales inválidas' });
 
+    // ── El superadmin elige con que cliente trabaja ────────────────────────
+    // Sin tenant, los correlativos no se pueden asignar (id_cliente es NOT
+    // NULL en la tabla correlativos) y el resto de las consultas no tendrian
+    // aislamiento. Por eso se exige elegir un cliente al iniciar sesion.
+    if (user.rol === 'superadmin') {
+      const clienteSolicitado = id_cliente || (req.body || {}).id_cliente;
+
+      if (!clienteSolicitado) {
+        const clientes = await Clientes.findAll({
+          where: { activo: true },
+          attributes: ['id_cliente', 'razon_social', 'dominio'],
+          order: [['razon_social', 'ASC']],
+        });
+
+        return res.status(400).json({
+          mensaje: 'Selecciona el cliente con el que vas a trabajar',
+          requiere_cliente: true,
+          clientes,
+        });
+      }
+
+      cliente = await Clientes.findByPk(Number(clienteSolicitado), {
+        attributes: ATRIBUTOS_CLIENTE,
+      });
+
+      if (!cliente || !cliente.activo) {
+        return res.status(400).json({
+          mensaje: 'El cliente seleccionado no existe o está inactivo',
+        });
+      }
+
+      id_cliente = cliente.id_cliente;
+      clienteBranding = {
+        razon_social: cliente.razon_social,
+        logo_url: cliente.logo_url,
+        color_primario: cliente.color_primario,
+        color_secundario: cliente.color_secundario,
+        color_terciario: cliente.color_terciario,
+        color_fondo: cliente.color_fondo,
+      };
+    }
+
     const sucursal = await Sucursal.findOne({
       where: { id_sucursal: user.id_sucursal },
     });
@@ -273,7 +395,7 @@ const login = async (req, res) => {
     // Obtener branding del cliente si no se obtuvo antes
     if (!clienteBranding && user.id_cliente) {
       const cliente = await Clientes.findByPk(user.id_cliente, {
-        attributes: ['razon_social', 'logo_url', 'color_primario', 'color_secundario', 'color_terciario', 'color_fondo'],
+        attributes: ATRIBUTOS_CLIENTE,
       });
       if (cliente) {
         clienteBranding = {
@@ -291,7 +413,7 @@ const login = async (req, res) => {
       id: user.id_usuario,
       nombre: user.nombre,
       rol: user.rol,
-      id_cliente: user.id_cliente,
+      id_cliente: id_cliente || user.id_cliente,
       id_sucursal: user.id_sucursal,
       nombre_sucursal: sucursal ? sucursal.nombre : null,
     };

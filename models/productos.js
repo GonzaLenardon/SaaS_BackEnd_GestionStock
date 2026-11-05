@@ -68,6 +68,11 @@ Productos.init(
       type: S.INTEGER,
       allowNull: true,
     },
+    id_curva: {
+      type: S.INTEGER,
+      allowNull: true,
+      comment: 'Curva de talles a la que pertenece el producto (null si no tiene)',
+    },
     correlativo: {
       type: S.INTEGER,
       allowNull: true,

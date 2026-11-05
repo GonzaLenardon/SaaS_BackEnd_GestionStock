@@ -2,7 +2,7 @@
 
 ## Descripción del proyecto
 
-Api backend en Node.js/Express para un SaaS de Gestion de stock/inventario para tiendas de ropa. Sequeliza ORM con PostgreSQL.
+Api backend en Node.js/Express para un SaaS de Gestion de stock/inventario para tiendas de ropa. Sequelize ORM con **MariaDB / MySQL** (dialect `mysql`).
 
 Multi-tenant: todos los clientes comparten una sola base de datos, aislados por columna `id_cliente` en cada tabla.
 
@@ -11,7 +11,8 @@ Multi-tenant: todos los clientes comparten una sola base de datos, aislados por 
 ```bash
 npm run dev        # Iniciar servidor de desarrollo con nodemon (puerto 5000)
 npm start          # Iniciar servidor de producción
-npm run migrate    # Ejecutar migraciones SQL desde la carpeta migrations/
+npm run migrate    # Migracion 008 (.sql) via scripts/run-migration.js (sin control)
+npm run db:migrate # Migraciones 009-011 (.cjs) via sequelize-cli (control en SequelizeMeta)
 npm run crear-admin # Crear superadmin (node scripts/crear-admin.js <nombre> <password>)
 ```
 
@@ -19,19 +20,22 @@ npm run crear-admin # Crear superadmin (node scripts/crear-admin.js <nombre> <pa
 
 ## Arquitectura
 
-- **Entrada**: `server.js` - sincroniza la DB con `sequelize.sync({ alter: true })` y luego inicia Express
+- **Entrada**: `server.js` - sincroniza la DB con `sequelize.sync()` (sin `alter`) y luego inicia Express
 - **Rutas**: `routes/index.js` - un solo router plano, todos los endpoints definidos aquí
 - **Controllers**: `controllers/*.js` - lógica de negocio (ventas, compras, productos, usuarios, etc.)
 - **Models**: `models/*.js` - modelos Sequelize; `models/index.js` define TODAS las relaciones
-- **Conexión DB**: `db/conection.js` - usa la variable de entorno `DATABASE_URL`
+- **Conexión DB**: `db/conection.js` - usa `DB_NAME`, `DB_USER`, `DB_PASS`, `DB_HOST`, `DB_PORT` del `.env`
 - **Auth**: JWT en cookies HTTP-only; `controllers/authMiddleware.js` protege las rutas
 - **Roles**: `requireRole('superadmin', 'admin')` verifica el rol del usuario autenticado
 - **Multi-tenant**: `controllers/tenantMiddleware.js` inyecta `id_cliente` en cada request
 
 ## Puntos críticos a tener en cuenta
 
-- **`sequelize.sync({ alter: true })` se ejecuta en cada arranque del servidor** (`server.js:35`). Esto altera automáticamente los esquemas de las tablas. No agregar cambios destructivos de columnas en los modelos sin entender que esto se propagará.
-- **Las migraciones SQL son independientes** del sync de Sequelize. Ejecutar `npm run migrate` manualmente. El script de migración (`scripts/run-migration.js`) lee todos los `.sql` de la carpeta en orden alfabético.
+- **`sequelize.sync()` se ejecuta en cada arranque del servidor** (`server.js:59`) **sin `alter`**: solo crea las tablas que faltan, no altera las existentes. Los cambios de esquema van en `migrations/*.cjs` (009-011, con sequelize-cli) o en el `008_*.sql` (runner viejo). En produccion el sync está deshabilitado (`server.js:62`).
+- **Las migraciones son independientes** del sync de Sequelize y hay DOS mecanismos:
+  - **`npm run db:migrate`** (sequelize-cli): ejecuta `migrations/*.cjs` (009, 010, 011). Cada archivo lleva el SQL inline en `up()` y queda registrado en la tabla **`SequelizeMeta`** (no se re-ejecutan). La conexion sale de `config/config.js` (lee el mismo `.env` que la app; `dialect: mysql` + `multipleStatements` para el SQL multi-sentencia). sequelize-cli prefiere `config.js` sobre `config.json` — no crear `.json`, se pisarian.
+  - **`npm run migrate`** (`scripts/run-migration.js`): ejecuta los `.sql` que queden en la carpeta (hoy solo `008_migrate_amor_data.sql`). **OJO**: no tiene tabla de control, re-ejecuta el archivo en cada corrida; el 008 tiene `UPDATE`/`INSERT` que pueden pisar cambios hechos despues. Antes de correr migraciones sobre produccion, hacer backup.
+  - Los archivos `.cjs` deben seguir siendo idempotentes (CREATE TABLE IF NOT EXISTS, INSERT IGNORE / NOT EXISTS); el `CREATE INDEX` de 009 lleva guardia de "duplicate key" en JS.
 - **Los modelos deben importarse en `routes/index.js`** para que `sequelize.sync` los registre. El comentario en `server.js:12` explica esto.
 - **Todas las relaciones están definidas en `models/index.js`**. Si se agrega un nuevo modelo, registrarlo y sus asociaciones ahí.
 - **El middleware de auth usa `req.cookies.Token`** (T mayúscula). El payload del JWT incluye `id`, `nombre`, `rol`, `id_cliente`, `id_sucursal`, `nombre_sucursal`.
@@ -57,7 +61,7 @@ npm run crear-admin # Crear superadmin (node scripts/crear-admin.js <nombre> <pa
 
 ## Entorno
 
-`.env` debe definir: `DATABASE_URL`, `PORT`, `SECRET`, `NODE_ENV`, `URL`. Para desarrollo local se usa `postgres://postgres:Abundancia@localhost:5432/amorInfinito`.
+`.env` debe definir: `DB_NAME`, `DB_USER`, `DB_PASS`, `DB_HOST`, `DB_PORT`, `PORT`, `SECRET`, `NODE_ENV`, `URL`. Para desarrollo local se usa MariaDB en `localhost:3308` con la base `gestiontienda` (user `root`).
 
 ## Convenciones de código
 
@@ -67,6 +71,9 @@ npm run crear-admin # Crear superadmin (node scripts/crear-admin.js <nombre> <pa
 - Se usan transacciones para operaciones de DB de varios pasos (ventas, cambios, rollback)
 - Uso intensivo de `include` de Sequelize para eager loading con aliases
 - Hay grandes bloques de código comentado en los controllers (iteraciones anteriores) - no eliminar sin confirmar que son verdaderamente obsoletos
+- **Collation de la base**: `utf8mb4_uca1400_ai_ci` → las comparaciones de texto en SQL son insensibles a mayusculas y acentos. Para comparaciones mas finas (espacios, equivalencias) usar `utils/duplicados.js` en JS.
+- **Correlativos**: `utils/correlativo.js` usa `SELECT ... FOR UPDATE` dentro de la transaccion. Pasarle siempre la transaccion en curso (`getNextCorrelative(id_cliente, entity, t)`) para que el lock valga.
+- **Aislamiento de tenant**: para validar que un `id_curva`, `producto_id` o `id_sucursal` pertenece al tenant usar `utils/validarTenant.js` (`validarCurvaDelTenant`, `validarProductosDelTenant`, `validarSucursalesDelTenant`, `validarTenantCompra`).
 
 ## Workflow de tareas
 

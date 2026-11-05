@@ -55,13 +55,25 @@ const {
 
 const {
   addProductos,
+  addProductosCurva,
   updateProductos,
   comprasProducto,
   productosStock,
   ventasProducto,
   actualizarCodigosBarras,
   softDeleteProducto,
+  getProductoPorCodigo,
+  valoresCampos,
 } = require('../controllers/productos');
+const {
+  allCurvas,
+  getCurva,
+  addCurva,
+  updateCurva,
+  deleteCurva,
+  allTallesCatalogo,
+  crearCurvasDefecto,
+} = require('../controllers/curvas');
 const {
   addProveedor,
   allProveedores,
@@ -166,10 +178,22 @@ router.get('/sucursal/usuario/:id_usuario', authMiddleware, tenantMiddleware, ge
 
 // Productos
 router.get('/productos', authMiddleware, tenantMiddleware, productosStock);
+  router.get('/productos/codigo/:codigo', authMiddleware, tenantMiddleware, getProductoPorCodigo);
+  router.get('/productos/valores', authMiddleware, tenantMiddleware, valoresCampos);
 router.post('/productos', authMiddleware, tenantMiddleware, addProductos);
+router.post('/productos/curva', authMiddleware, tenantMiddleware, addProductosCurva);
 router.put('/productos/', authMiddleware, tenantMiddleware, updateProductos);
 router.put('/productos/upcodigobarra', authMiddleware, tenantMiddleware, actualizarCodigosBarras);
 router.put('/productos/activo/:id', authMiddleware, tenantMiddleware, requireRole('admin', 'superadmin'), softDeleteProducto);
+
+// Curvas de talles
+router.get('/curvas', authMiddleware, tenantMiddleware, allCurvas);
+router.get('/curvas/talles', authMiddleware, tenantMiddleware, allTallesCatalogo);
+router.get('/curvas/:id', authMiddleware, tenantMiddleware, getCurva);
+router.post('/curvas', authMiddleware, tenantMiddleware, requireRole('admin', 'superadmin'), addCurva);
+router.post('/curvas/defaults', authMiddleware, tenantMiddleware, requireRole('admin', 'superadmin'), crearCurvasDefecto);
+router.put('/curvas/:id', authMiddleware, tenantMiddleware, requireRole('admin', 'superadmin'), updateCurva);
+router.delete('/curvas/:id', authMiddleware, tenantMiddleware, requireRole('admin', 'superadmin'), deleteCurva);
 
 // Proveedores
 router.get('/proveedor', authMiddleware, tenantMiddleware, allProveedores);
