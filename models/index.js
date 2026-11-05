@@ -19,6 +19,9 @@ const AjusteStockDetalle = require('./ajusteStockDetalles');
 const Clientes = require('./clientes');
 const ClienteConfig = require('./clienteConfig');
 const Correlativo = require('./correlativo');
+const Curvas = require('./curvas');
+const CurvaTalles = require('./curvaTalles');
+const ProductoCodigos = require('./productoCodigos');
 
 // Relación: Una venta tiene muchos detalles de venta
 
@@ -276,6 +279,24 @@ AjusteStock.belongsTo(Clientes, { foreignKey: 'id_cliente', as: 'cliente' });
 Clientes.hasMany(Transferencia, { foreignKey: 'id_cliente', as: 'transferencias' });
 Transferencia.belongsTo(Clientes, { foreignKey: 'id_cliente', as: 'cliente' });
 
+// ============================================================
+// ASOCIACIONES CURVAS DE TALLES
+// ============================================================
+
+Clientes.hasMany(Curvas, { foreignKey: 'id_cliente', as: 'curvas' });
+Curvas.belongsTo(Clientes, { foreignKey: 'id_cliente', as: 'cliente' });
+
+Curvas.hasMany(CurvaTalles, { foreignKey: 'id_curva', as: 'talles' });
+CurvaTalles.belongsTo(Curvas, { foreignKey: 'id_curva', as: 'curva' });
+
+// Un producto puede pertenecer a una curva de talles
+Curvas.hasMany(Productos, { foreignKey: 'id_curva', as: 'productos' });
+Productos.belongsTo(Curvas, { foreignKey: 'id_curva', as: 'curva' });
+
+// Historial de codigos de barras anteriores (alias)
+Productos.hasMany(ProductoCodigos, { foreignKey: 'id_producto', as: 'codigosAnteriores' });
+ProductoCodigos.belongsTo(Productos, { foreignKey: 'id_producto', as: 'producto' });
+
 module.exports = {
   Usuarios,
   Ventas,
@@ -298,4 +319,7 @@ module.exports = {
   Clientes,
   ClienteConfig,
   Correlativo,
+  Curvas,
+  CurvaTalles,
+  ProductoCodigos,
 };

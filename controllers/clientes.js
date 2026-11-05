@@ -1,4 +1,5 @@
 const { Clientes, Sucursal, Usuarios } = require('../models');
+const { crearCurvasPorDefecto } = require('../utils/curvasDefecto');
 const path = require('path');
 const fs = require('fs');
 
@@ -69,7 +70,15 @@ const addCliente = async (req, res) => {
       color_fondo: color_fondo || '#ffffff',
     });
 
-    res.status(201).json({ message: 'Cliente creado exitosamente', cliente: nuevoCliente });
+    // Cada cliente arranca con las curvas de talles estandar (Letras y
+    // Numerica). Son suyas: puede extenderlas sin afectar a los demas.
+    const curvasCreadas = await crearCurvasPorDefecto(nuevoCliente.id_cliente);
+
+    res.status(201).json({
+      message: 'Cliente creado exitosamente',
+      cliente: nuevoCliente,
+      curvas: curvasCreadas.length,
+    });
   } catch (error) {
     console.error('Error al crear cliente:', error);
     res.status(500).json({ error: 'Error en el servidor' });

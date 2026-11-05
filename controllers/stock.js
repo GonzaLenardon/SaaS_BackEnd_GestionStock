@@ -14,6 +14,10 @@ const {
 const db = require('../db/conection');
 const { fechaActual } = require('../utils/fechaHelper');
 const { getNextCorrelative } = require('../utils/correlativo');
+const {
+  validarSucursalesDelTenant,
+  validarProductosDelTenant,
+} = require('../utils/validarTenant');
 
 /* const verStock = async (req, res) => {
   const idSucursal = req.params.sucursal;
@@ -126,6 +130,7 @@ const transferirStock = async (req, res) => {
 
   try {
     if (!origenId || !destinoId || !productoId || !cantidad || cantidad <= 0) {
+      await t.rollback();
       return res.status(400).json({ error: 'Datos incompletos o invalidos' });
     }
 
@@ -144,12 +149,12 @@ const transferirStock = async (req, res) => {
 
     // Buscar en StockSucursal por sucursal origen, trayendo lotes del producto usando DetalleCompra
     const stockOrigen = await StockSucursal.findAll({
-      where: { id_sucursal: origenId },
+      where: { id_sucursal: origenId, id_cliente: req.id_cliente },
       include: [
         {
           model: DetalleCompra,
           as: 'sucursalDetalleToCompra',
-          where: { producto_id: productoId },
+          where: { producto_id: productoId, id_cliente: req.id_cliente },
         },
       ],
       order: [
@@ -160,6 +165,7 @@ const transferirStock = async (req, res) => {
         ],
       ], // FIFO por fecha de compra
       transaction: t,
+      lock: t.LOCK.UPDATE,
     });
 
     if (!stockOrigen.length) {
@@ -189,6 +195,7 @@ const transferirStock = async (req, res) => {
           stock: aTransferir,
           id_sucursal: destinoId,
           id_detalle_compra: registro.id_detalle_compra,
+          id_cliente: req.id_cliente,
         },
         { transaction: t },
       );
@@ -251,6 +258,30 @@ const crearAjusteStock = async (req, res) => {
   const t = await db.transaction();
 
   try {
+    // La sucursal debe pertenecer al tenant.
+    const sucursalOk = await validarSucursalesDelTenant(
+      [id_sucursal],
+      req.id_cliente,
+      t
+    );
+
+    if (!sucursalOk.ok) {
+      await t.rollback();
+      return res.status(400).json({ error: sucursalOk.mensaje });
+    }
+
+    // Los productos a ajustar tambien deben ser del tenant.
+    const productosOk = await validarProductosDelTenant(
+      (items || []).map((i) => i.producto_id),
+      req.id_cliente,
+      t
+    );
+
+    if (!productosOk.ok) {
+      await t.rollback();
+      return res.status(400).json({ error: productosOk.mensaje });
+    }
+
     const ajuste = await AjusteStock.create(
       {
         id_usuario,
@@ -280,6 +311,7 @@ const crearAjusteStock = async (req, res) => {
         ],
         where: {
           producto_id: item.producto_id,
+          id_cliente: req.id_cliente,
         },
         order: [['createdAt', 'ASC']], // FIFO por fecha de compra
         transaction: t,

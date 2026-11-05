@@ -554,21 +554,115 @@ const { fechaActual } = require('../utils/fechaHelper');
 const registrarVenta = async (req, res) => {
   const t = await db.transaction();
   try {
-    const {
-      id_usuario,
-      id_sucursal,
-      id_tipo_venta,
-      porcentaje_aplicado,
-      detalles,
-    } = req.body;
+    const { id_tipo_venta, detalles } = req.body;
 
-    // Validar que todos los productos estén activos
+    // ── 1. Sucursal ────────────────────────────────────────────────────────
+    // La venta se registra en la sucursal asignada al usuario. Si el usuario
+    // no tiene sucursal (caso del superadmin) no se puede vender.
+    const sucursalDelUsuario = req.user?.id_sucursal;
+
+    if (!sucursalDelUsuario) {
+      await t.rollback();
+      return res.status(400).json({
+        error:
+          'Tu usuario no tiene sucursal asignada. Pedile a un administrador que la asigne.',
+      });
+    }
+
+    // La sucursal del body no se toma como authoritative: se usa siempre la
+    // del usuario, para no registrar la venta en otra sucursal.
+    const sucursalVenta = Number(sucursalDelUsuario);
+
+    // La sucursal debe pertenecer al tenant y estar habilitada.
+    const sucursalValida = await Sucursal.findOne({
+      where: {
+        id_sucursal: sucursalVenta,
+        id_cliente: req.id_cliente,
+        habilitado: true,
+      },
+      transaction: t,
+    });
+
+    if (!sucursalValida) {
+      await t.rollback();
+      return res.status(400).json({
+        error:
+          'La sucursal asignada a tu usuario no pertenece a este cliente o esta deshabilitada.',
+      });
+    }
+
+    // ── 2. Tipo de venta ───────────────────────────────────────────────────
+    // Debe pertenecer al tenant y estar habilitado. El porcentaje se toma del
+    // tipo de venta, no del body, para que no se pueda falsear el descuento.
+    const tipoVentaValido = await TipoVenta.findOne({
+      where: {
+        id_tipo: id_tipo_venta,
+        id_cliente: req.id_cliente,
+        habilitado: true,
+      },
+      transaction: t,
+    });
+
+    if (!tipoVentaValido) {
+      await t.rollback();
+      return res.status(400).json({
+        error: 'El tipo de venta seleccionado no es valido o no esta habilitado.',
+      });
+    }
+
+    const porcentaje = Number(tipoVentaValido.porcentajeVenta) || 0;
+    const esInteres = tipoVentaValido.tipo_porcentaje === 'interes';
+
+    // ── 3. Detalles ────────────────────────────────────────────────────────
+    if (!Array.isArray(detalles) || detalles.length === 0) {
+      await t.rollback();
+      return res.status(400).json({
+        error: 'La venta debe tener al menos un producto',
+      });
+    }
+
     for (const item of detalles) {
-      const producto = await Productos.findByPk(item.id_producto);
-      if (!producto || producto.activo === false) {
+      const cantidad = Number(item.cantidad);
+
+      if (!Number.isFinite(cantidad) || cantidad <= 0) {
         await t.rollback();
         return res.status(400).json({
-          error: `El producto con id ${item.id_producto} no está activo`,
+          error: `La cantidad del producto ${item.id_producto} debe ser mayor a cero`,
+        });
+      }
+    }
+
+    // ── 4. Productos: del tenant y activos ─────────────────────────────────
+    const idsProducto = [
+      ...new Set(detalles.map((d) => Number(d.id_producto)).filter(Boolean)),
+    ];
+
+    const productos = await Productos.findAll({
+      attributes: ['id_producto', 'nombre', 'precio_venta', 'activo'],
+      where: { id_producto: idsProducto, id_cliente: req.id_cliente },
+      transaction: t,
+      raw: true,
+    });
+
+    const mapaProductos = new Map(
+      productos.map((p) => [Number(p.id_producto), p]),
+    );
+
+    for (const item of detalles) {
+      const idProducto = Number(item.id_producto);
+      const producto = mapaProductos.get(idProducto);
+
+      if (!producto) {
+        await t.rollback();
+        return res.status(400).json({
+          error: `El producto con id ${idProducto} no pertenece a este cliente`,
+        });
+      }
+
+      if (producto.activo === false) {
+        await t.rollback();
+        return res.status(400).json({
+          error: `El producto con id ${idProducto} no esta activo`,
         });
       }
     }
@@ -576,12 +670,19 @@ const registrarVenta = async (req, res) => {
     const fecha = fechaActual();
 
     const totalBruto = detalles.reduce(
-      (acc, item) => acc + item.precio_venta * item.cantidad,
+      (acc, item) => acc + Number(item.precio_venta) * Number(item.cantidad),
       0,
     );
 
-    const montoDescuento = (totalBruto * porcentaje_aplicado) / 100;
-    const totalFinal = totalBruto - montoDescuento;
+    const montoPorcentaje = (totalBruto * porcentaje) / 100;
+
+    // Con 'interes' el porcentaje suma; con 'descuento' resta.
+    const totalFinal = esInteres
+      ? totalBruto + montoPorcentaje
+      : totalBruto - montoPorcentaje;
+
+    // Se guarda con signo para que total = totalBruto - monto_descuento.
+    const montoDescuento = esInteres ? -montoPorcentaje : montoPorcentaje;
 
     const correlativoVenta = await getNextCorrelative(req.id_cliente, 'ventas', t);
 
@@ -589,11 +690,11 @@ const registrarVenta = async (req, res) => {
       {
         fecha,
         total: totalFinal,
-        porcentaje_aplicado: porcentaje_aplicado,
+        porcentaje_aplicado: porcentaje,
         monto_descuento: montoDescuento,
-        id_usuario,
-        id_sucursal,
-        id_tipo_venta: id_tipo_venta,
+        id_usuario: req.user.id,
+        id_sucursal: sucursalVenta,
+        id_tipo_venta: tipoVentaValido.id_tipo,
         id_cliente: req.id_cliente,
         correlativo: correlativoVenta,
       },
@@ -602,11 +703,12 @@ const registrarVenta = async (req, res) => {
 
     // Iterar detalles
     for (const item of detalles) {
-      let cantidadRestante = item.cantidad;
+      let cantidadRestante = Number(item.cantidad);
+      const producto = mapaProductos.get(Number(item.id_producto));
 
       // Buscar lotes FIFO
       const lotes = await StockSucursal.findAll({
-        where: { id_sucursal },
+        where: { id_sucursal: sucursalVenta, id_cliente: req.id_cliente },
         include: {
           model: DetalleCompra,
           as: 'sucursalDetalleToCompra',
@@ -629,11 +731,11 @@ const registrarVenta = async (req, res) => {
         if (disponible > 0) {
           const aDescontar = Math.min(disponible, cantidadRestante);
 
-          const producto = await Productos.findByPk(item.id_producto);
-
-          const precioFinalUnitario =
-            producto.precio_venta -
-            (producto.precio_venta * porcentaje_aplicado) / 100;
+          const precioFinalUnitario = esInteres
+            ? producto.precio_venta +
+              (producto.precio_venta * porcentaje) / 100
+            : producto.precio_venta -
+              (producto.precio_venta * porcentaje) / 100;
 
           const total = precioFinalUnitario * aDescontar;
 
@@ -645,7 +747,7 @@ const registrarVenta = async (req, res) => {
               cantidad: aDescontar,
               total,
               fecha,
-              id_sucursal,
+              id_sucursal: sucursalVenta,
               id_detalle_compra: lote.id_detalle_compra,
               id_cliente: req.id_cliente,
             },
@@ -661,9 +763,10 @@ const registrarVenta = async (req, res) => {
       }
 
       if (cantidadRestante > 0) {
-        throw new Error(
-          `Stock insuficiente para el producto ${item.id_producto} en la sucursal ${id_sucursal}`,
-        );
+        await t.rollback();
+        return res.status(400).json({
+          error: `Stock insuficiente para el producto ${item.id_producto} en la sucursal ${sucursalVenta}`,
+        });
       }
     }
 
