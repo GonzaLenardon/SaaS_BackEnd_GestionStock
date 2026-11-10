@@ -73,14 +73,14 @@ jobs:
         run: |
           {
             echo "### MariaDB"
-            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e "SELECT VERSION();"
-            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e "SELECT @@lower_case_table_names;"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e "SELECT VERSION() AS version;" || true
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e "SELECT @@lower_case_table_names AS lower_case_table_names;" || true
             echo
             echo "### Tablas de tipo (el nombre importa en Linux)"
-            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e \
-              "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE '%tipo%';"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e \
+              "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE '%tipo%';" || true
             echo
             echo "### Migraciones aplicadas"
-            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e \
-              "SELECT name FROM SequelizeMeta ORDER BY name;"
-          } >> $GITHUB_STEP_SUMMARY
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e \
+              "SELECT name FROM SequelizeMeta ORDER BY name;" || true
+          } 2>&1 | tee -a $GITHUB_STEP_SUMMARY
