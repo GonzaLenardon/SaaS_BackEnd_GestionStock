@@ -192,6 +192,20 @@ const verificar = async () => {
     else errores.push(mensaje);
   };
 
+  // 0. La tabla de tipo de gasto debe llamarse 'tipoGastos' con mayuscula.
+  // En Linux las mayusculas importan (lower_case_table_names = 0) y fue
+  // justamente esa diferencia la que hizo fallar la migracion en produccion.
+  const tablasTipo = await q(`
+    SELECT TABLE_NAME AS nombre
+    FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE '%tipo%'
+  `);
+  const nombresTipo = tablasTipo.map((t) => t.nombre);
+  chequear(
+    nombresTipo.includes('tipoGastos'),
+    `La tabla de tipo de gasto se creo como 'tipoGastos' (encontradas: ${nombresTipo.join(', ')}).`,
+  );
+
   // 1. El flag quedo puesto segun el tipo de tienda.
   const flags = await q(`
     SELECT id_cliente, value FROM cliente_config
