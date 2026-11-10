@@ -68,8 +68,19 @@ jobs:
       - name: Verificar resultado
         run: node scripts/test-migraciones.js verificar
 
-      - name: Mostrar migraciones aplicadas
+      - name: Resumen
         if: always()
         run: |
-          mysql -h 127.0.0.1 -P 3306 -u root -pprueba prueba_migraciones \
-            -e "SELECT name FROM SequelizeMeta ORDER BY name;"
+          {
+            echo "### MariaDB"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e "SELECT VERSION();"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e "SELECT @@lower_case_table_names;"
+            echo
+            echo "### Tablas de tipo (el nombre importa en Linux)"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e \
+              "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE '%tipo%';"
+            echo
+            echo "### Migraciones aplicadas"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -N -e \
+              "SELECT name FROM SequelizeMeta ORDER BY name;"
+          } >> $GITHUB_STEP_SUMMARY
