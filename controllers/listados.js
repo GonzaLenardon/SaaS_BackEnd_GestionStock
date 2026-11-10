@@ -167,12 +167,6 @@ const resumenVentasDesdeHasta = async (req, res) => {
     const ventas = await Ventas.findAll({
       where: whereClause,
       include: [
-        { model: DetalleVentas, as: 'detalles' },
-        {
-          model: Cambio,
-          as: 'ventacambio',
-          include: [{ model: DetalleCambio, as: 'cambiodetalles' }],
-        },
         {
           model: TipoVenta,
           as: 'tipoVenta',
@@ -186,28 +180,9 @@ const resumenVentasDesdeHasta = async (req, res) => {
     for (const venta of ventas) {
       const idTipoVenta = venta.id_tipo_venta;
       const tipoVentaNombre = venta.tipoVenta?.tipoVenta || 'Sin nombre';
-      const totalVenta = Number(venta.total);
-
-      let totalDevuelve = 0;
-      let totalRecibe = 0;
-
-      if (Array.isArray(venta.ventacambio)) {
-        for (const cambio of venta.ventacambio) {
-          if (Array.isArray(cambio.cambiodetalles)) {
-            for (const det of cambio.cambiodetalles) {
-              const subtotal = Number(det.precio_unitario) * det.cantidad;
-              if (det.tipo === 'devuelve') {
-                totalDevuelve += subtotal;
-              } else if (det.tipo === 'recibe') {
-                totalRecibe += subtotal;
-              }
-            }
-          }
-        }
-      }
-
-      const diferenciaCambio = totalRecibe - totalDevuelve;
-      const totalFinal = totalVenta + diferenciaCambio;
+      // El total de la venta ya es histórico. La diferencia de un cambio se
+      // registra como venta propia el día del cambio, así que no se suma aquí.
+      const totalFinal = Number(venta.total);
 
       if (!resumenMap.has(idTipoVenta)) {
         resumenMap.set(idTipoVenta, {

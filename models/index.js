@@ -22,6 +22,7 @@ const Correlativo = require('./correlativo');
 const Curvas = require('./curvas');
 const CurvaTalles = require('./curvaTalles');
 const ProductoCodigos = require('./productoCodigos');
+const CompraHistorial = require('./compraHistorial');
 
 // Relación: Una venta tiene muchos detalles de venta
 
@@ -322,4 +323,5 @@ module.exports = {
   Curvas,
   CurvaTalles,
   ProductoCodigos,
+  CompraHistorial,
 };

@@ -31,6 +31,13 @@ StockSucursal.init(
     modelName: 'stockSucursal',
     tableName: 'stock_sucursal', // 👈 importante
     timestamps: false,
+    indexes: [
+      {
+        unique: true,
+        name: 'uq_stock_sucursal_lote',
+        fields: ['id_sucursal', 'id_detalle_compra'],
+      },
+    ],
   },
 );
 

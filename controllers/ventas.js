@@ -13,6 +13,10 @@ const {
 const db = require('../db/conection');
 const { fn, col, where, Op } = require('sequelize');
 const { getNextCorrelative } = require('../utils/correlativo');
+const {
+  usaNumeracionCorrelativa,
+  numeroVisible,
+} = require('../utils/numeracion');
 
 const allVentas = async (req, res) => {
   const fecha = fechaActual();
@@ -118,8 +122,12 @@ const desdeHasta = async (req, res) => {
       whereClause.id_cliente = req.id_cliente;
     }
 
+    const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
+
     const ventas = await Ventas.findAll({
       where: whereClause,
+      // El orden sigue al numero que ve el usuario: correlativo propio de la
+      // tienda o id interno. En ambos casos el orden es el mismo que por id.
       order: [['id_venta', 'ASC']],
       include: [
         {
@@ -180,7 +188,8 @@ const desdeHasta = async (req, res) => {
         }
 
         const diferenciaCambio = totalRecibe - totalDevuelve;
-        const totalFinal = Number(venta.total) + diferenciaCambio;
+        // Total histórico: la diferencia de un cambio ya es una venta propia.
+        const totalFinal = Number(venta.total);
 
         // ============================================================
         // 🔄 Detectar si esta venta es de diferencia (devolución)
@@ -203,6 +212,7 @@ const desdeHasta = async (req, res) => {
           if (ventaQueGenero) {
             ventaOriginalAsociada = {
               id_venta: ventaQueGenero.id_venta,
+              nro: numeroVisible(ventaQueGenero, 'id_venta', porCorrelativo),
               fecha: ventaQueGenero.fecha,
               esDevolucion: true,
               cambio_asociado: cambioQueGenero.id_cambio,
@@ -212,6 +222,7 @@ const desdeHasta = async (req, res) => {
 
         return {
           ...venta.toJSON(),
+          nro: numeroVisible(venta, 'id_venta', porCorrelativo),
           totalDevuelve,
           totalRecibe,
           diferenciaCambio,
@@ -258,6 +269,8 @@ const ventasPorSucursal = async (req, res) => {
     if (req.user.rol !== 'superadmin') {
       whereClause.id_cliente = req.id_cliente;
     }
+
+    const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
 
     const ventas = await Ventas.findAll({
       where: whereClause,
@@ -324,7 +337,8 @@ const ventasPorSucursal = async (req, res) => {
         }
 
         const diferenciaCambio = totalRecibe - totalDevuelve;
-        const totalFinal = Number(venta.total) + diferenciaCambio;
+        // Total histórico: la diferencia de un cambio ya es una venta propia.
+        const totalFinal = Number(venta.total);
 
         // ============================================================
         // 🔄 Detectar si esta venta es de diferencia (devolución)
@@ -347,6 +361,7 @@ const ventasPorSucursal = async (req, res) => {
           if (ventaQueGenero) {
             ventaOriginalAsociada = {
               id_venta: ventaQueGenero.id_venta,
+              nro: numeroVisible(ventaQueGenero, 'id_venta', porCorrelativo),
               fecha: ventaQueGenero.fecha,
               esDevolucion: true,
               cambio_asociado: cambioQueGenero.id_cambio,
@@ -356,6 +371,7 @@ const ventasPorSucursal = async (req, res) => {
 
         return {
           ...venta.toJSON(),
+          nro: numeroVisible(venta, 'id_venta', porCorrelativo),
           totalDevuelve,
           totalRecibe,
           diferenciaCambio,
@@ -707,12 +723,15 @@ const registrarVenta = async (req, res) => {
       const producto = mapaProductos.get(Number(item.id_producto));
 
       // Buscar lotes FIFO
+      // El tenant se filtra por el lote (detallecompras.id_cliente), que es
+      // siempre no nulo. stock_sucursal.id_cliente puede quedar NULL en filas
+      // legacy y no debe ocultar stock disponible.
       const lotes = await StockSucursal.findAll({
-        where: { id_sucursal: sucursalVenta, id_cliente: req.id_cliente },
+        where: { id_sucursal: sucursalVenta },
         include: {
           model: DetalleCompra,
           as: 'sucursalDetalleToCompra',
-          where: { producto_id: item.id_producto },
+          where: { producto_id: item.id_producto, id_cliente: req.id_cliente },
         },
         order: [
           [
@@ -853,15 +872,62 @@ const deleteVenta = async (req, res) => {
       : { id_venta: id, id_cliente: req.id_cliente };
 
     const venta = await Ventas.findOne({ where: ventaWhere, transaction: t });
-    if (!venta) return res.status(404).json({ error: 'Venta no encontrada' });
+    if (!venta) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Venta no encontrada' });
+    }
+
+    // ==========================================================
+    // Bloquear si la venta tiene cambios asociados. Sus filas ya
+    // movieron stock (devoluciones/recepciones) y el cambio
+    // referenciaría una venta inexistente.
+    // ==========================================================
+    if (venta.tiene_cambios) {
+      await t.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: 'La venta tiene cambios asociados y no se puede eliminar',
+      });
+    }
+
+    const cambioReferido = await Cambio.findOne({
+      where: {
+        [Op.or]: [{ id_venta_original: id }, { id_venta_diferencia: id }],
+      },
+      transaction: t,
+    });
+    if (cambioReferido) {
+      await t.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: 'La venta tiene cambios asociados y no se puede eliminar',
+      });
+    }
+
+    const detalleConCambio = await DetalleVentas.findOne({
+      where: {
+        id_venta: id,
+        [Op.or]: [{ es_reversado: true }, { id_cambio_asociado: { [Op.ne]: null } }],
+      },
+      transaction: t,
+    });
+    if (detalleConCambio) {
+      await t.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: 'La venta tiene cambios asociados y no se puede eliminar',
+      });
+    }
 
     const detalles = await DetalleVentas.findAll({
       where: { id_venta: id },
       transaction: t,
     });
 
-    console.log('Detalles sssss ..... ', detalles);
     for (const detalle of detalles) {
+      // Las filas revertidas ya devolvieron stock en su cambio: no restaurar.
+      if (detalle.es_reversado) continue;
+
       // Verificar que exista el id_detalle_compra
       if (!detalle.id_detalle_compra) {
         throw new Error(
@@ -887,6 +953,7 @@ const deleteVenta = async (req, res) => {
             id_sucursal: detalle.id_sucursal,
             id_detalle_compra: detalle.id_detalle_compra,
             stock: detalle.cantidad,
+            id_cliente: venta.id_cliente,
           },
           { transaction: t },
         );
@@ -1526,10 +1593,56 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
 };
  */
 
+/**
+ * Resuelve una venta a partir de un numero que el usuario tipea.
+ *
+ * En las tiendas con numeracion propia el numero que ve el usuario es el
+ * correlativo; en las demas es el id. Se busca primero por id y, si no
+ * aparece, por correlativo (siempre filtrando por tenant).
+ *
+ * @param {number|string} numero
+ * @param {object} req
+ * @returns {Promise<{id_venta:number}|null>}
+ */
+const resolverVentaPorNumero = async (numero, req) => {
+  const valor = parseInt(numero, 10);
+  if (!Number.isInteger(valor)) return null;
+
+  const base = req.user.rol === 'superadmin'
+    ? {}
+    : { id_cliente: req.id_cliente };
+
+  let venta = await Ventas.findOne({
+    where: { ...base, id_venta: valor },
+    attributes: ['id_venta'],
+  });
+  if (venta) return venta;
+
+  const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
+  if (!porCorrelativo) return null;
+
+  // Un correlativo es unico dentro del tenant.
+  venta = await Ventas.findOne({
+    where: { ...base, correlativo: valor },
+    attributes: ['id_venta'],
+  });
+  return venta;
+};
+
 const obtenerVentaConHistorialYVigentes = async (req, res) => {
-  const id_venta_inicial = parseInt(req.params.id_venta, 10);
+  const numeroIngresado = req.params.id_venta;
 
   try {
+    const ventaResuelta = await resolverVentaPorNumero(numeroIngresado, req);
+
+    if (!ventaResuelta) {
+      return res.status(404).json({
+        error: 'La venta no existe',
+      });
+    }
+
+    const id_venta_inicial = ventaResuelta.id_venta;
+
     const ventaWhere = req.user.rol === 'superadmin'
       ? { id_venta: id_venta_inicial }
       : { id_venta: id_venta_inicial, id_cliente: req.id_cliente };
@@ -1564,7 +1677,7 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
 
     const ventaOriginal = await Ventas.findOne({
       where: ventaOriginalWhere,
-      attributes: ['id_venta', 'total', 'fecha', 'id_sucursal'],
+      attributes: ['id_venta', 'total', 'fecha', 'id_sucursal', 'correlativo'],
       include: [
         {
           model: DetalleVentas,
@@ -1599,6 +1712,7 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
         'fecha',
         'observaciones',
         'id_venta_diferencia',
+        'correlativo',
       ],
       include: [
         {
@@ -1625,8 +1739,30 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
       order: [['fecha', 'ASC']], // Ordenar por fecha ascendente
     });
 
+    const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
+
+    // Numero que ve el usuario de la venta generada por cada cambio.
+    const nroDeVentaDiferencia = new Map();
+    const idsDiferencia = cambios
+      .map((c) => c.id_venta_diferencia)
+      .filter((id) => id != null);
+    if (idsDiferencia.length) {
+      const ventasDiferencia = await Ventas.findAll({
+        where: { id_venta: idsDiferencia },
+        attributes: ['id_venta', 'correlativo'],
+      });
+      for (const v of ventasDiferencia) {
+        nroDeVentaDiferencia.set(
+          v.id_venta,
+          numeroVisible(v, 'id_venta', porCorrelativo),
+        );
+      }
+    }
+
     // 3) FORMATEAR VENTA ORIGINAL
     const ventaOriginalFormateada = {
+      nro: numeroVisible(ventaOriginal, 'id_venta', porCorrelativo),
+      correlativo: ventaOriginal.correlativo,
       id_venta: ventaOriginal.id_venta,
       fecha: ventaOriginal.fecha,
       total: ventaOriginal.total,
@@ -1670,9 +1806,13 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
       return {
         numero: index + 1,
         id_cambio: cambio.id_cambio,
+        nro: numeroVisible(cambio, 'id_cambio', porCorrelativo),
         fecha: cambio.fecha,
         observaciones: cambio.observaciones,
         id_venta_diferencia: cambio.id_venta_diferencia,
+        nro_venta_diferencia:
+          nroDeVentaDiferencia.get(cambio.id_venta_diferencia) ??
+          cambio.id_venta_diferencia,
         devueltos,
         recibidos,
       };

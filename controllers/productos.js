@@ -17,6 +17,11 @@ const { fechaActual } = require('../utils/fechaHelper');
 const { getNextCorrelative } = require('../utils/correlativo');
 const { validarCurvaDelTenant } = require('../utils/validarTenant');
 const { buscarPosiblesDuplicados } = require('../utils/duplicados');
+const {
+  usaNumeracionCorrelativa,
+  numeroVisible,
+  prefijoCodigo,
+} = require('../utils/numeracion');
 
 /**
  * Deduce la curva de un producto a partir de su talle.
@@ -152,7 +157,12 @@ const addProductos = async (req, res) => {
     const id = newProd.id_producto;
     const prodPlano = newProd.get({ plain: true });
 
-    const codigoGenerado = await generarCodigo(prodPlano);
+    // El prefijo del codigo sigue la numeracion de la tienda: correlativo
+    // (0001, 0002...) si la tienda lo usa, id_producto en las demas.
+    const porCorrelativo = await usaNumeracionCorrelativa(targetClientId);
+    const codigoGenerado = await generarCodigo(prodPlano, {
+      prefijo: prefijoCodigo(prodPlano, porCorrelativo),
+    });
 
     await Productos.update(
       { codigo: codigoGenerado },
@@ -344,7 +354,10 @@ const addProductosCurva = async (req, res) => {
         );
 
         // El codigo depende del id_producto recien generado
-        const codigoGenerado = await generarCodigo(nuevo.get({ plain: true }));
+        const porCorrelativo = await usaNumeracionCorrelativa(targetClientId);
+        const codigoGenerado = await generarCodigo(nuevo.get({ plain: true }), {
+          prefijo: prefijoCodigo(nuevo.get({ plain: true }), porCorrelativo),
+        });
 
         await Productos.update(
           { codigo: codigoGenerado },
@@ -426,6 +439,7 @@ const productosStock = async (req, res) => {
   p.costo,
   p.precio_venta,
   p.id_curva,
+  p.correlativo,
   COALESCE(suma_stock.total_stock, 0) AS stock_total_producto,
 
   CASE 
@@ -481,11 +495,18 @@ WHERE 1=1
 GROUP BY 
   p.id_producto, p.nombre, p.codigo, p.marca, p.modelo, 
   p.talle, p.color, p.porcentaje, p.observaciones, p.precio_venta, 
-  p.costo, p.id_curva, suma_stock.total_stock
+  p.costo, p.id_curva, p.correlativo, suma_stock.total_stock
 ORDER BY p.nombre;
 `;
 
     const [result] = await sequelize.query(query, { replacements });
+
+    // El numero que ve el usuario: correlativo propio de la tienda o id.
+    const porCorrelativo = await usaNumeracionCorrelativa(idCliente);
+    for (const fila of result) {
+      fila.nro = numeroVisible(fila, 'id_producto', porCorrelativo);
+    }
+
     res.json(result);
   } catch (error) {
     console.error('Error al obtener productos con stock:', error);
@@ -523,12 +544,24 @@ const updateProductos = async (req, res) => {
     // El codigo se genera con los datos FINALES del producto (los del body si
     // vienen, los guardados si no). Asi un PUT parcial (solo precio) no
     // regenera el codigo con datos vacios.
-    const codGenerado = await generarCodigo({
-      id_producto: productoExistente.id_producto,
-      nombre: nombre !== undefined ? nombre : productoExistente.nombre,
-      marca: marca !== undefined ? marca : productoExistente.marca,
-      talle: talle !== undefined ? talle : productoExistente.talle,
-    });
+    // El prefijo numerico no cambia al editar: es el correlativo (tiendas con
+    // numeracion propia) o el id_producto (resto). Lo que cambia son las
+    // letras del nombre/marca/talle.
+    const porCorrelativo = await usaNumeracionCorrelativa(
+      productoExistente.id_cliente,
+    );
+    const codGenerado = await generarCodigo(
+      {
+        id_producto: productoExistente.id_producto,
+        correlativo: productoExistente.correlativo,
+        nombre: nombre !== undefined ? nombre : productoExistente.nombre,
+        marca: marca !== undefined ? marca : productoExistente.marca,
+        talle: talle !== undefined ? talle : productoExistente.talle,
+      },
+      {
+        prefijo: prefijoCodigo(productoExistente, porCorrelativo),
+      },
+    );
 
     const fecha = fechaActual();
 
@@ -735,6 +768,13 @@ const valoresCampos = async (req, res) => {
   }
 };
 
+/**
+ * Regenera los codigos de barras del tenant.
+ *
+ * El prefijo numerico sigue la numeracion de la tienda (correlativo propio o
+ * id_producto). El codigo anterior de cada producto queda como alias para
+ * que las etiquetas ya impresas sigan resolviendo al producto correcto.
+ */
 const actualizarCodigosBarras = async (req, res) => {
   try {
     const where = req.user.rol === 'superadmin'
@@ -743,14 +783,42 @@ const actualizarCodigosBarras = async (req, res) => {
 
     const productos = await Productos.findAll({ where });
 
+    const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
+    const fecha = fechaActual();
+    let actualizados = 0;
+
     for (const prod of productos) {
-      const nuevoCodigo = await generarCodigo(prod.get({ plain: true }));
+      const plano = prod.get({ plain: true });
+      const nuevoCodigo = await generarCodigo(plano, {
+        prefijo: prefijoCodigo(plano, porCorrelativo),
+      });
+
+      if (nuevoCodigo === prod.codigo) continue;
+
+      // El codigo viejo queda como alias (si el tenant lo tiene).
+      if (prod.codigo && prod.id_cliente) {
+        await ProductoCodigos.findOrCreate({
+          where: {
+            id_cliente: prod.id_cliente,
+            codigo: prod.codigo,
+          },
+          defaults: {
+            id_producto: prod.id_producto,
+            id_cliente: prod.id_cliente,
+            codigo: prod.codigo,
+            created_at: fecha,
+          },
+        });
+      }
+
       await prod.update({ codigo: nuevoCodigo });
+      actualizados += 1;
     }
 
     return res.status(200).json({
       message: 'Codigos de barra actualizados correctamente',
       total: productos.length,
+      actualizados,
     });
   } catch (error) {
     console.error('Error al actualizar codigos de barra:', error);
@@ -773,7 +841,7 @@ const comprasProducto = async (req, res) => {
           attributes: ['nombre'],
         },
       ],
-      attributes: ['fecha'],
+      attributes: ['fecha', 'correlativo', 'id_compra'],
     };
 
     if (req.user.rol !== 'superadmin') {
@@ -793,7 +861,18 @@ const comprasProducto = async (req, res) => {
       order: [['id_detalle', 'ASC']],
     });
 
-    res.status(200).send(comprasDeProducto);
+    const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
+    const respuesta = comprasDeProducto.map((detalle) => ({
+      ...detalle.toJSON(),
+      compra: detalle.compra
+        ? {
+            ...detalle.compra.toJSON(),
+            nro: numeroVisible(detalle.compra, 'id_compra', porCorrelativo),
+          }
+        : null,
+    }));
+
+    res.status(200).send(respuesta);
   } catch (error) {
     console.error('Error al obtener productos:', error);
     res.status(500).json({ error: 'Error al obtener productos' });
@@ -808,7 +887,7 @@ const ventasProducto = async (req, res) => {
     const ventaInclude = {
       model: Ventas,
       as: 'venta',
-      attributes: ['fecha', 'total', 'id_venta'],
+      attributes: ['fecha', 'total', 'id_venta', 'correlativo'],
     };
 
     if (req.user.rol !== 'superadmin') {
@@ -828,7 +907,18 @@ const ventasProducto = async (req, res) => {
       order: [['id_detalleventa', 'ASC']],
     });
 
-    res.status(200).send(ventasDeProducto);
+    const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
+    const respuesta = ventasDeProducto.map((detalle) => ({
+      ...detalle.toJSON(),
+      venta: detalle.venta
+        ? {
+            ...detalle.venta.toJSON(),
+            nro: numeroVisible(detalle.venta, 'id_venta', porCorrelativo),
+          }
+        : null,
+    }));
+
+    res.status(200).send(respuesta);
   } catch (error) {
     console.error('Error al obtener ventas del producto:', error);
     res.status(500).json({ error: 'Error al obtener ventas del producto' });
