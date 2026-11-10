@@ -26,7 +26,7 @@ TipoGastos.init(
       comment: 'Numero correlativo per-tenant para display',
     },
   },
-  { sequelize: db, modelName: 'tipoGastos', tableName: 'tipogastos' }
+  { sequelize: db, modelName: 'tipoGastos' }
 );
 
 module.exports = TipoGastos;

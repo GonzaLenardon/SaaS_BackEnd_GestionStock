@@ -1,0 +1,86 @@
+name: Probar migraciones en Linux
+
+# Corre las migraciones contra una MariaDB de Linux (lower_case_table_names = 0,
+# igual que produccion) usando una base sintetica. En Windows MariaDB no
+# distingue mayusculas de minusculas, asi que ahi no se puede reproducir el
+# error de la tabla 'tipoGastos' que fallo en produccion.
+#
+# La base es sintetica a proposito: el repositorio es publico y el dump de
+# produccion tiene datos reales de clientes.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - version2.0.2
+    paths:
+      - 'migrations/**'
+      - 'models/**'
+      - 'scripts/test-migraciones.js'
+      - '.github/workflows/test-migraciones-linux.yml'
+
+jobs:
+  migraciones:
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: prueba
+          MARIADB_DATABASE: prueba_migraciones
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      DB_NAME: prueba_migraciones
+      DB_USER: root
+      DB_PASS: prueba
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      NODE_ENV: development
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Mostrar version de MariaDB
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e "SELECT VERSION(); SELECT @@lower_case_table_names;"
+
+      - name: Preparar base sintetica
+        run: node scripts/test-migraciones.js preparar
+
+      - name: Correr migraciones
+        run: npm run db:migrate
+
+      - name: Verificar resultado
+        run: node scripts/test-migraciones.js verificar
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "### MariaDB"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e "SELECT VERSION() AS version;" || true
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e "SELECT @@lower_case_table_names AS lower_case_table_names;" || true
+            echo
+            echo "### Tablas de tipo (el nombre importa en Linux)"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e \
+              "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME LIKE '%tipo%';" || true
+            echo
+            echo "### Migraciones aplicadas"
+            mysql -h 127.0.0.1 -P 3306 -u root -pprueba -e \
+              "SELECT name FROM SequelizeMeta ORDER BY name;" || true
+          } 2>&1 | tee -a $GITHUB_STEP_SUMMARY

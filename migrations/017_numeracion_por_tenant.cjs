@@ -36,6 +36,11 @@ const CLAVE_CONFIG = 'numeracion_por_correlativo';
 // primaria. Las tablas de detalle (detalleventas, detallecompras,
 // stock_sucursal, etc.) NO se renumeran: su correlativo es un contador de
 // lineas, no un numero de documento.
+//
+// OJO con el nombre: en Linux (lower_case_table_names = 0) MariaDB distingue
+// mayusculas de minusculas, asi que 'tipoGastos' y 'tipogastos' son tablas
+// distintas. Por eso el nombre real se resuelve contra information_schema en
+// tiempo de ejecucion (ver resolverTabla) en lugar de confiar en el literal.
 const TABLAS = [
   { tabla: 'ventas', pk: 'id_venta', entidad: 'ventas' },
   { tabla: 'productos', pk: 'id_producto', entidad: 'productos' },
@@ -48,8 +53,27 @@ const TABLAS = [
   { tabla: 'usuarios', pk: 'id_usuario', entidad: 'usuarios' },
   { tabla: 'proveedores', pk: 'id_proveedor', entidad: 'proveedores' },
   { tabla: 'tipoventa', pk: 'id_tipo', entidad: 'tipoventa' },
-  { tabla: 'tipogastos', pk: 'id_tipogasto', entidad: 'tipoGastos' },
+  { tabla: 'tipoGastos', pk: 'id_tipogasto', entidad: 'tipoGastos' },
 ];
+
+/**
+ * Resuelve el nombre real de una tabla en la base, sin distinguir
+ * mayusculas de minusculas. Devuelve null si la tabla no existe.
+ *
+ * En Windows (lower_case_table_names = 1) MariaDB no distingue y devuelve
+ * la primera coincidencia. En Linux devuelve el nombre tal como fue creado,
+ * que es el que hay que usar en las consultas.
+ */
+const resolverTabla = async (q, nombre) => {
+  const [filas] = await q(`
+    SELECT TABLE_NAME AS nombre
+    FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND LOWER(TABLE_NAME) = LOWER('${nombre}')
+    LIMIT 1
+  `);
+  return filas && filas.length > 0 ? filas[0].nombre : null;
+};
 
 module.exports = {
   up: async (queryInterface) => {
@@ -114,7 +138,22 @@ module.exports = {
     // 2. Renumeracion contigua 1..N para los tenants con 'true'
     // ---------------------------------------------------------------
     // correlativo = posicion por id. Solo para tenants marcados en el paso 1.
-    for (const { tabla, pk } of TABLAS) {
+    // El nombre real de cada tabla se resuelve contra information_schema:
+    // en Linux las mayusculas importan y no todas las instalaciones usan
+    // el mismo nombre.
+    const tablasReales = [];
+    for (const def of TABLAS) {
+      const real = await resolverTabla(q, def.tabla);
+      if (!real) {
+        console.log(
+          `  [017] La tabla ${def.tabla} no existe en esta base: se omite.`,
+        );
+        continue;
+      }
+      tablasReales.push({ ...def, tabla: real });
+    }
+
+    for (const { tabla, pk } of tablasReales) {
       await q(`
         UPDATE \`${tabla}\` t
         JOIN (
@@ -133,7 +172,7 @@ module.exports = {
     // ---------------------------------------------------------------
     // 3. correlativos.last_number al maximo real
     // ---------------------------------------------------------------
-    for (const { tabla, entidad } of TABLAS) {
+    for (const { tabla, entidad } of tablasReales) {
       await q(`
         UPDATE correlativos co
         JOIN (
@@ -161,7 +200,7 @@ module.exports = {
       ) ENGINE = MEMORY
     `);
 
-    for (const { entidad } of TABLAS) {
+    for (const { entidad } of tablasReales) {
       await q(
         `INSERT INTO tmp_entidades_numeracion (entity_type) VALUES ('${entidad}')`,
       );
@@ -186,17 +225,36 @@ module.exports = {
     // ---------------------------------------------------------------
     // 4. Backfill de detallecambios.id_cliente
     // ---------------------------------------------------------------
-    await q(`
-      UPDATE detallecambios dc
-      JOIN cambios c ON c.id_cambio = dc.id_cambio
-      SET dc.id_cliente = c.id_cliente
-      WHERE dc.id_cliente IS NULL
-        AND c.id_cliente IS NOT NULL
-    `);
+    const tablaDetalleCambios = await resolverTabla(q, 'detallecambios');
+    const tablaCambios = await resolverTabla(q, 'cambios');
+
+    if (tablaDetalleCambios && tablaCambios) {
+      await q(`
+        UPDATE \`${tablaDetalleCambios}\` dc
+        JOIN \`${tablaCambios}\` c ON c.id_cambio = dc.id_cambio
+        SET dc.id_cliente = c.id_cliente
+        WHERE dc.id_cliente IS NULL
+          AND c.id_cliente IS NOT NULL
+      `);
+    } else {
+      console.log(
+        '  [017] No se encuentran detallecambios/cambios: se omite el backfill.',
+      );
+    }
 
     // ---------------------------------------------------------------
     // 5. FK de stock_sucursal: SET NULL -> RESTRICT
     // ---------------------------------------------------------------
+    const tablaStock = await resolverTabla(q, 'stock_sucursal');
+    const tablaDetalleCompras = await resolverTabla(q, 'detallecompras');
+
+    if (!tablaStock || !tablaDetalleCompras) {
+      console.log(
+        '  [017] No se encuentran stock_sucursal/detallecompras: se omite el cambio de FK.',
+      );
+      return;
+    }
+
     const [fks] = await q(`
       SELECT k.CONSTRAINT_NAME AS nombre
       FROM information_schema.KEY_COLUMN_USAGE k
@@ -204,7 +262,7 @@ module.exports = {
         ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
        AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
       WHERE k.TABLE_SCHEMA = DATABASE()
-        AND k.TABLE_NAME = 'stock_sucursal'
+        AND k.TABLE_NAME = '${tablaStock}'
         AND k.COLUMN_NAME = 'id_detalle_compra'
         AND k.REFERENCED_TABLE_NAME IS NOT NULL
       LIMIT 1
@@ -214,12 +272,12 @@ module.exports = {
       const nombre = fks[0].nombre;
       // DROP y ADD van en sentencias separadas: en un solo ALTER, MariaDB
       // reconstruye la tabla y el indice unico choca al copiar los datos.
-      await q(`ALTER TABLE stock_sucursal DROP FOREIGN KEY \`${nombre}\``);
+      await q(`ALTER TABLE \`${tablaStock}\` DROP FOREIGN KEY \`${nombre}\``);
       await q(`
-        ALTER TABLE stock_sucursal
+        ALTER TABLE \`${tablaStock}\`
         ADD CONSTRAINT \`${nombre}\`
           FOREIGN KEY (id_detalle_compra)
-          REFERENCES detallecompras (id_detalle)
+          REFERENCES \`${tablaDetalleCompras}\` (id_detalle)
           ON DELETE RESTRICT
           ON UPDATE CASCADE
       `);
