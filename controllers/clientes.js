@@ -1,4 +1,5 @@
-const { Clientes, Sucursal, Usuarios } = require('../models');
+const { Clientes, Sucursal, Usuarios, ClienteConfig } = require('../models');
+const { CLAVE: CLAVE_NUMERACION } = require('../utils/numeracion');
 const { crearCurvasPorDefecto } = require('../utils/curvasDefecto');
 const path = require('path');
 const fs = require('fs');
@@ -73,6 +74,16 @@ const addCliente = async (req, res) => {
     // Cada cliente arranca con las curvas de talles estandar (Letras y
     // Numerica). Son suyas: puede extenderlas sin afectar a los demas.
     const curvasCreadas = await crearCurvasPorDefecto(nuevoCliente.id_cliente);
+
+    // Los clientes nuevos nacen con numeracion propia: los correlativos
+    // arrancan en 1 y son los numeros que ve el usuario.
+    await ClienteConfig.upsert({
+      id_cliente: nuevoCliente.id_cliente,
+      key: CLAVE_NUMERACION,
+      value: 'true',
+      description:
+        'Mostrar el correlativo propio de la tienda en lugar del id interno',
+    });
 
     res.status(201).json({
       message: 'Cliente creado exitosamente',

@@ -1,4 +1,5 @@
 const { ClienteConfig, Clientes } = require('../models');
+const { invalidarCache } = require('../utils/numeracion');
 
 const DEFAULT_CONFIG = {
   iva_porcentaje: '21',
@@ -97,6 +98,9 @@ const updateConfig = async (req, res) => {
         description: null,
       });
     }
+
+    // La numeracion visible puede haber cambiado: se invalida la cache.
+    invalidarCache(id_cliente);
 
     res.status(200).json({ message: 'Configuración actualizada correctamente' });
   } catch (error) {

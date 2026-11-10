@@ -148,8 +148,10 @@ const transferirStock = async (req, res) => {
     }
 
     // Buscar en StockSucursal por sucursal origen, trayendo lotes del producto usando DetalleCompra
+    // El tenant se filtra por el lote (detallecompras.id_cliente), no por
+    // stock_sucursal.id_cliente, que puede quedar NULL en filas legacy.
     const stockOrigen = await StockSucursal.findAll({
-      where: { id_sucursal: origenId, id_cliente: req.id_cliente },
+      where: { id_sucursal: origenId },
       include: [
         {
           model: DetalleCompra,
@@ -189,16 +191,32 @@ const transferirStock = async (req, res) => {
       registro.stock -= aTransferir;
       await registro.save({ transaction: t });
 
-      // Agregar al destino
-      await StockSucursal.create(
-        {
-          stock: aTransferir,
+      // Agregar al destino: si ya existe fila para ese lote en la sucursal
+      // destino se suma sobre ella (evita duplicados); si no, se crea con el
+      // tenant del lote origen (no del usuario, que puede ser superadmin).
+      const filaDestino = await StockSucursal.findOne({
+        where: {
           id_sucursal: destinoId,
           id_detalle_compra: registro.id_detalle_compra,
-          id_cliente: req.id_cliente,
         },
-        { transaction: t },
-      );
+        lock: t.LOCK.UPDATE,
+        transaction: t,
+      });
+
+      if (filaDestino) {
+        filaDestino.stock += aTransferir;
+        await filaDestino.save({ transaction: t });
+      } else {
+        await StockSucursal.create(
+          {
+            stock: aTransferir,
+            id_sucursal: destinoId,
+            id_detalle_compra: registro.id_detalle_compra,
+            id_cliente: registro.id_cliente ?? req.id_cliente,
+          },
+          { transaction: t },
+        );
+      }
 
       detallesTransferencia.push({
         producto_id: productoId,
@@ -284,6 +302,8 @@ const crearAjusteStock = async (req, res) => {
 
     const ajuste = await AjusteStock.create(
       {
+        // Hora Argentina: el defaultValue NOW del modelo usa UTC (+3h).
+        fecha: fechaActual(),
         id_usuario,
         id_sucursal: Number(id_sucursal),
         motivo,

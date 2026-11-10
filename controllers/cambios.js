@@ -11,6 +11,10 @@ const {
 const db = require('../db/conection');
 const { Op } = require('sequelize');
 const { getNextCorrelative } = require('../utils/correlativo');
+const { fechaActual } = require('../utils/fechaHelper');
+
+// Redondea a 2 decimales (importes en pesos).
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
 /* const registrarCambioProducto = async (req, res) => {
   const {
@@ -624,21 +628,77 @@ const registrarCambioProducto = async (req, res) => {
       }
     }
 
+    // ==========================================================
+    // 0) VALIDAR DEVUELTOS ANTES DE ESCRIBIR NADA
+    //    La cantidad devuelta no puede superar lo vigente de la venta
+    //    original para ese producto y lote.
+    // ==========================================================
+    for (const item of devuelto || []) {
+      const vigentes = await DetalleVentas.findAll({
+        where: {
+          id_venta: id_venta_original,
+          id_producto: item.producto_id,
+          id_detalle_compra: item.id_detalle_compra,
+          es_reversado: false,
+        },
+        transaction: t,
+      });
+      const totalVigente = vigentes.reduce((s, f) => s + Number(f.cantidad), 0);
+      if (Number(item.cantidad) > totalVigente) {
+        await t.rollback();
+        return res.status(400).json({
+          ok: false,
+          error: `No se puede devolver ${item.cantidad} del producto ${item.producto_id}: en la venta quedan ${totalVigente} vigentes.`,
+        });
+      }
+    }
+
+    // ==========================================================
+    // 0b) RECALCULAR MONTOS Y VALIDAR
+    //     El cliente nunca puede quedar a favor: recibido >= devuelto.
+    //     La diferencia se recalcula desde los items; la que llega en el body
+    //     solo se acepta si coincide.
+    // ==========================================================
+    const totalDevueltoCalc = round2(
+      (devuelto || []).reduce((s, it) => s + Number(it.precio_unitario) * Number(it.cantidad), 0),
+    );
+    const totalRecibidoCalc = round2(
+      (recibido || []).reduce((s, it) => s + Number(it.precio_unitario) * Number(it.cantidad), 0),
+    );
+    const diferenciaCalc = round2(totalRecibidoCalc - totalDevueltoCalc);
+
+    if (diferenciaCalc < 0) {
+      await t.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: `El valor recibido (${totalRecibidoCalc}) es menor que el devuelto (${totalDevueltoCalc}). El cambio no puede quedar a favor del cliente.`,
+      });
+    }
+
+    const diferenciaBody = round2(Number(diferencia || 0));
+    if (Math.abs(diferenciaBody - diferenciaCalc) > 0.01) {
+      await t.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: `La diferencia enviada (${diferenciaBody}) no coincide con la calculada (${diferenciaCalc}) a partir de los productos devueltos y recibidos.`,
+      });
+    }
+
     let id_venta_diferencia = null;
+
+    // Hora Argentina para la venta de diferencia y sus lineas, para que no
+    // usen el defaultValue NOW (UTC) y queden con 3 horas de desfase.
+    const fecha = fechaActual();
 
     // ==========================================================
     // 1) CREAR VENTA DE DIFERENCIA (si diferencia > 0)
     // ==========================================================
-    if (diferencia > 0) {
-      const hoy = new Date();
-      const tresHorasEnMs = 3 * 60 * 60 * 1000;
-      const fecha = new Date(hoy.getTime() - tresHorasEnMs);
-
+    if (diferenciaCalc > 0) {
       const nuevaVenta = await Ventas.create(
         {
           id_tipo_venta: parseInt(tventaSeleccionada),
           fecha,
-          total: diferencia,
+          total: diferenciaCalc,
           id_sucursal: sucursal_id,
           id_usuario,
           porcentaje_aplicado: 0,
@@ -656,11 +716,12 @@ const registrarCambioProducto = async (req, res) => {
           id_producto: null, // Sin producto específico
           nombreProducto: 'Diferencia por cambio',
           cantidad: 1,
-          precio_unitario: diferencia,
-          total: diferencia,
+          precio_unitario: diferenciaCalc,
+          total: diferenciaCalc,
           fecha,
           id_sucursal: sucursal_id,
           id_detalle_compra: null,
+          id_cliente: req.id_cliente,
           es_cambio: false, // No es parte del cambio en sí
         },
         { transaction: t },
@@ -677,6 +738,7 @@ const registrarCambioProducto = async (req, res) => {
         id_venta_original,
         id_venta_diferencia, // puede ser null si no hay diferencia
         observaciones,
+        fecha: fechaActual(),
         id_cliente: req.id_cliente,
         correlativo: await getNextCorrelative(req.id_cliente, 'cambio', t),
       },
@@ -702,28 +764,73 @@ const registrarCambioProducto = async (req, res) => {
           precio_unitario,
           tipo: 'devuelve',
           id_detalle_compra,
+          id_cliente: req.id_cliente,
+          correlativo: await getNextCorrelative(req.id_cliente, 'detalle_cambio', t),
         },
         { transaction: t },
       );
 
       console.log(`✅ DetalleCambio creado ID: ${detalleCambioCreado.id_detalle_cambio}`);
 
-      // 3.2 ✅ NUEVO: Marcar DetalleVentas de la venta original como reversados
-      await DetalleVentas.update(
-        {
-          es_reversado: true,
-          id_cambio_asociado: detalleCambioCreado.id_detalle_cambio,
+      // 3.2 Dividir las filas vigentes de la venta original (FIFO por fila).
+      //     Devolucion completa de una fila: se marca revertida.
+      //     Devolucion parcial: la fila baja a lo que se quedo el cliente y se
+      //     crea una fila revertida por lo devuelto, con su importe exacto.
+      let pendiente = Number(cantidad);
+      const filasVigentes = await DetalleVentas.findAll({
+        where: {
+          id_venta: id_venta_original,
+          id_producto: producto_id,
+          id_detalle_compra,
+          es_reversado: false,
         },
-        {
-          where: {
-            id_venta: id_venta_original,
-            id_producto: producto_id,
-            id_detalle_compra: id_detalle_compra,
-            es_reversado: false, // Solo marcar los que no están ya reversados
-          },
-          transaction: t,
-        },
-      );
+        order: [['id_detalleventa', 'ASC']],
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      for (const fila of filasVigentes) {
+        if (pendiente <= 0) break;
+
+        const cantFila = Number(fila.cantidad);
+        const aDevolver = Math.min(cantFila, pendiente);
+        const totalFila = Number(fila.total);
+
+        if (aDevolver === cantFila) {
+          await fila.update(
+            { es_reversado: true, id_cambio_asociado: detalleCambioCreado.id_detalle_cambio },
+            { transaction: t },
+          );
+        } else {
+          const totalDevuelto = round2((totalFila * aDevolver) / cantFila);
+          const totalQueda = round2(totalFila - totalDevuelto);
+
+          await fila.update(
+            { cantidad: cantFila - aDevolver, total: totalQueda },
+            { transaction: t },
+          );
+
+          const { id_detalleventa, createdAt, updatedAt, ...datos } = fila.get({ plain: true });
+          await DetalleVentas.create(
+            {
+              ...datos,
+              cantidad: aDevolver,
+              total: totalDevuelto,
+              es_reversado: true,
+              id_cambio_asociado: detalleCambioCreado.id_detalle_cambio,
+            },
+            { transaction: t },
+          );
+        }
+
+        pendiente -= aDevolver;
+      }
+
+      if (pendiente > 0) {
+        throw new Error(
+          `Devolución del producto ${producto_id} excede lo vigente en la venta original`,
+        );
+      }
 
       // 3.3 SUMAR STOCK AL LOTE CORRECTO
       const lotesStockAntes = await StockSucursal.findAll({
@@ -850,6 +957,8 @@ const registrarCambioProducto = async (req, res) => {
             precio_unitario,
             tipo: 'recibe',
             id_detalle_compra: lote.id_detalle_compra,
+            id_cliente: req.id_cliente,
+            correlativo: await getNextCorrelative(req.id_cliente, 'detalle_cambio', t),
           },
           { transaction: t },
         );
@@ -872,6 +981,8 @@ const registrarCambioProducto = async (req, res) => {
               total: descontar * precio_unitario,
               id_sucursal: sucursal_id,
               id_detalle_compra: lote.id_detalle_compra,
+              id_cliente: req.id_cliente,
+              fecha,
               es_cambio: true, // ✅ Marcar como producto de cambio
               id_cambio_asociado: detalleCambioCreado.id_detalle_cambio, // ✅ Link para auditoría
             },

@@ -6,11 +6,13 @@ const fileUpload = require('express-fileupload');
 const cors = require('cors');
 const app = express();
 app.use(express.json());
-app.use(fileUpload({
-  limits: { fileSize: 2 * 1024 * 1024 },
-  abortOnLimit: true,
-  createParentPath: true,
-}));
+app.use(
+  fileUpload({
+    limits: { fileSize: 2 * 1024 * 1024 },
+    abortOnLimit: true,
+    createParentPath: true,
+  }),
+);
 const PORT = process.env.PORT || 3000;
 const ventas = require('./models/ventas');
 const DetalleVentas = require('./models/detalleVentas');
@@ -30,7 +32,10 @@ app.use(
       const hostname = new URL(origin).hostname;
 
       // Permitir el dominio principal y cualquier subdominio
-      if (hostname === ALLOWED_DOMAIN || hostname.endsWith('.' + ALLOWED_DOMAIN)) {
+      if (
+        hostname === ALLOWED_DOMAIN ||
+        hostname.endsWith('.' + ALLOWED_DOMAIN)
+      ) {
         callback(null, true);
       } else {
         callback(new Error('No permitido por CORS'));
@@ -55,12 +60,12 @@ app.use('/', router);
 
 const startServer = async () => {
   try {
-    if (process.env.NODE_ENV !== 'production') {
+    /*  if (process.env.NODE_ENV !== 'production') {
       await sequelize.sync();
       console.log('📦 Base de datos sincronizada (dev).');
     } else {
       console.log('📦 Modo producción — sync deshabilitado.');
-    }
+    } */
 
     app.listen(PORT, () => {
       console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);

@@ -94,20 +94,75 @@ async function rollbackCambio(idCambio) {
 
         console.log('➖ Revirtiendo DEVUELVE:', detalle.id_detalle_compra);
 
-        // Restaurar detalleventa original
-        await db.query(
+        // Restaurar detalleventa original.
+        // Si la devolucion partio una fila, la fila revertida vuelve a sumarse
+        // a la vigente de la misma venta/producto/lote y se borra. Si no hay
+        // vigente con quien unirla, se reactiva tal cual (devolucion completa).
+        const revertidas = await db.query(
           `
-          UPDATE detalleventas
-          SET es_reversado = 0,
-              id_cambio_asociado = NULL
+          SELECT id_detalleventa, id_venta, id_producto, id_detalle_compra, cantidad, total
+          FROM detalleventas
           WHERE id_cambio_asociado = ?
           `,
           {
             replacements: [detalle.id_detalle_cambio],
-            type: QueryTypes.UPDATE,
+            type: QueryTypes.SELECT,
             transaction,
           },
         );
+
+        for (const r of revertidas) {
+          const [vigente] = await db.query(
+            `
+            SELECT id_detalleventa FROM detalleventas
+            WHERE id_venta = ? AND id_producto = ? AND id_detalle_compra = ?
+              AND es_reversado = 0 AND id_detalleventa <> ?
+            ORDER BY id_detalleventa ASC
+            LIMIT 1
+            `,
+            {
+              replacements: [r.id_venta, r.id_producto, r.id_detalle_compra, r.id_detalleventa],
+              type: QueryTypes.SELECT,
+              transaction,
+            },
+          );
+
+          if (vigente) {
+            await db.query(
+              `
+              UPDATE detalleventas
+              SET cantidad = cantidad + ?, total = total + ?
+              WHERE id_detalleventa = ?
+              `,
+              {
+                replacements: [r.cantidad, r.total, vigente.id_detalleventa],
+                type: QueryTypes.UPDATE,
+                transaction,
+              },
+            );
+            await db.query(
+              `DELETE FROM detalleventas WHERE id_detalleventa = ?`,
+              {
+                replacements: [r.id_detalleventa],
+                type: QueryTypes.DELETE,
+                transaction,
+              },
+            );
+          } else {
+            await db.query(
+              `
+              UPDATE detalleventas
+              SET es_reversado = 0, id_cambio_asociado = NULL
+              WHERE id_detalleventa = ?
+              `,
+              {
+                replacements: [r.id_detalleventa],
+                type: QueryTypes.UPDATE,
+                transaction,
+              },
+            );
+          }
+        }
       }
 
       // =====================================================
