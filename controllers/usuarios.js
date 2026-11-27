@@ -298,9 +298,11 @@ const login = async (req, res) => {
       });
 
       if (!cliente) {
+        // Op.like (no iLike): la BD es MySQL; su collación por defecto ya es
+        // case-insensitive. iLike es exclusivo de Postgres y lanzaba error -> 500.
         cliente = await Clientes.findOne({
           where: {
-            razon_social: { [Op.iLike]: `%${clienteSlug}%` },
+            razon_social: { [Op.like]: `%${clienteSlug}%` },
             activo: true,
           },
           attributes: ATRIBUTOS_CLIENTE,

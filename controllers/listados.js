@@ -8,6 +8,7 @@ const {
 } = require('../models');
 const { fn, col, where: sqWhere, Op } = require('sequelize');
 const sequelize = require('../db/conection');
+const { calcularDiferencia } = require('../utils/diferenciasCambio');
 
 const resumenVentas = async (req, res) => {
   try {
@@ -287,9 +288,107 @@ const capitalStock = async (req, res) => {
   }
 };
 
+/**
+ * Ajustes por cambios — el concepto separado de las ventas.
+ *
+ * Cuando el cliente devuelve mas de lo que se lleva, la diferencia queda a
+ * favor del comercio: NO es una venta ni un cobro, asi que no va en los
+ * totales de ventas por tipo de venta. Se informa aparte, con su monto y la
+ * cantidad de cambios, y tambien por sucursal.
+ */
+const resumenAjustesCambios = async (req, res) => {
+  try {
+    const { desde, hasta, id_sucursal } = req.body;
+
+    if (!desde || !hasta) {
+      return res.status(400).json({ error: 'Faltan fechas desde o hasta' });
+    }
+
+    const desdeFecha = new Date(`${desde}T00:00:00`);
+    const hastaFecha = new Date(`${hasta}T23:59:59`);
+
+    const whereCambio = {
+      fecha: { [Op.between]: [desdeFecha, hastaFecha] },
+    };
+
+    if (req.user.rol !== 'superadmin') {
+      whereCambio.id_cliente = req.id_cliente;
+    }
+
+    const cambios = await Cambio.findAll({
+      where: whereCambio,
+      attributes: ['id_cambio', 'fecha', 'id_venta_original'],
+      include: [
+        {
+          model: DetalleCambio,
+          as: 'cambiodetalles',
+          attributes: ['producto_id', 'cantidad', 'precio_unitario', 'tipo'],
+        },
+        {
+          model: Ventas,
+          as: 'ventaOriginal',
+          attributes: ['id_venta', 'id_sucursal'],
+          required: true,
+        },
+      ],
+      order: [['fecha', 'ASC']],
+    });
+
+    let montoTotal = 0;
+    let cantidadCambios = 0;
+    const porSucursal = new Map();
+
+    for (const cambio of cambios) {
+      const { diferenciaFavorComercio } = calcularDiferencia([cambio]);
+
+      if (diferenciaFavorComercio <= 0) continue;
+
+      cantidadCambios += 1;
+      montoTotal += diferenciaFavorComercio;
+
+      const idSucursal = cambio.ventaOriginal?.id_sucursal ?? null;
+
+      if (idSucursal != null) {
+        const actual = porSucursal.get(idSucursal) || {
+          id_sucursal: idSucursal,
+          monto: 0,
+          cantidad: 0,
+        };
+        actual.monto += diferenciaFavorComercio;
+        actual.cantidad += 1;
+        porSucursal.set(idSucursal, actual);
+      }
+    }
+
+    // Si se pidio una sucursal puntual, se filtra el resultado.
+    const sucursales = Array.from(porSucursal.values()).filter(
+      (s) =>
+        id_sucursal == null || Number(s.id_sucursal) === Number(id_sucursal),
+    );
+
+    const montoFiltrado = sucursales.reduce((s, x) => s + x.monto, 0);
+    const cantidadFiltrada = sucursales.reduce((s, x) => s + x.cantidad, 0);
+
+    return res.status(200).json({
+      monto_total: parseFloat(montoFiltrado.toFixed(2)),
+      cantidad_cambios: cantidadFiltrada,
+      monto_todas_sucursales: parseFloat(montoTotal.toFixed(2)),
+      cantidad_todas_sucursales: cantidadCambios,
+      por_sucursal: sucursales.map((s) => ({
+        ...s,
+        monto: parseFloat(s.monto.toFixed(2)),
+      })),
+    });
+  } catch (error) {
+    console.error('Error en resumenAjustesCambios:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   resumenVentas,
   resumenVentasDesdeHasta,
   ventasPorSucursales,
+  resumenAjustesCambios,
   capitalStock,
 };

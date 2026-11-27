@@ -7,11 +7,13 @@ const {
   DetalleVentas,
   Productos,
   Sucursal,
+  TipoVenta,
 } = require('../models');
 const db = require('../db/conection');
 const { Op } = require('sequelize');
 const { getNextCorrelative } = require('../utils/correlativo');
 const { fechaActual } = require('../utils/fechaHelper');
+const { calcularDiferencia } = require('../utils/diferenciasCambio');
 
 // Redondea a 2 decimales (importes en pesos).
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
@@ -629,6 +631,29 @@ const registrarCambioProducto = async (req, res) => {
     }
 
     // ==========================================================
+    // 0) SUCURSAL: el cambio se registra SIEMPRE en la sucursal
+    //    de la venta original. Si no coinciden, el stock se
+    //    movería de un lado y del otro.
+    // ==========================================================
+    const ventaOriginalVenta = await Ventas.findByPk(id_venta_original, {
+      attributes: ['id_venta', 'id_sucursal'],
+      transaction: t,
+    });
+
+    if (!ventaOriginalVenta) {
+      await t.rollback();
+      return res.status(404).json({ error: 'La venta original no existe' });
+    }
+
+    if (Number(ventaOriginalVenta.id_sucursal) !== Number(sucursal_id)) {
+      await t.rollback();
+      return res.status(400).json({
+        ok: false,
+        error: 'El cambio se registra en la sucursal de la venta original.',
+      });
+    }
+
+    // ==========================================================
     // 0) VALIDAR DEVUELTOS ANTES DE ESCRIBIR NADA
     //    La cantidad devuelta no puede superar lo vigente de la venta
     //    original para ese producto y lote.
@@ -654,34 +679,54 @@ const registrarCambioProducto = async (req, res) => {
     }
 
     // ==========================================================
-    // 0b) RECALCULAR MONTOS Y VALIDAR
-    //     El cliente nunca puede quedar a favor: recibido >= devuelto.
-    //     La diferencia se recalcula desde los items; la que llega en el body
-    //     solo se acepta si coincide.
+    // 0b) CALCULAR EL SALDO DEL CAMBIO (regla única)
+    //     Devuelto > Recibido  → diferencia a favor del comercio
+    //                          (ajuste del cambio, NO es venta ni cobro)
+    //     Recibido > Devuelto  → diferencia a cobrar (el cliente paga)
+    //     Iguales             → cambio parejo, sin cobro
     // ==========================================================
-    const totalDevueltoCalc = round2(
-      (devuelto || []).reduce((s, it) => s + Number(it.precio_unitario) * Number(it.cantidad), 0),
-    );
-    const totalRecibidoCalc = round2(
-      (recibido || []).reduce((s, it) => s + Number(it.precio_unitario) * Number(it.cantidad), 0),
-    );
-    const diferenciaCalc = round2(totalRecibidoCalc - totalDevueltoCalc);
+    const {
+      totalDevuelto,
+      totalRecibido,
+      diferenciaACobrar,
+      diferenciaFavorComercio,
+      totalCompensado,
+    } = calcularDiferencia([
+      {
+        detalles: [
+          ...(devuelto || []).map((d) => ({ ...d, tipo: 'devuelve' })),
+          ...(recibido || []).map((d) => ({ ...d, tipo: 'recibe' })),
+        ],
+      },
+    ]);
 
-    if (diferenciaCalc < 0) {
-      await t.rollback();
-      return res.status(400).json({
-        ok: false,
-        error: `El valor recibido (${totalRecibidoCalc}) es menor que el devuelto (${totalDevueltoCalc}). El cambio no puede quedar a favor del cliente.`,
+    // Si hay diferencia a cobrar, el cliente paga: hace falta el medio de
+    // pago. Si la diferencia queda a favor del comercio o es cero, no hay
+    // cobro y no se pide ningun tipo de venta.
+    let tipoVentaId = null;
+    if (diferenciaACobrar > 0) {
+      const tipo = await TipoVenta.findOne({
+        where: { id_tipo: parseInt(tventaSeleccionada, 10) || 0 },
+        transaction: t,
       });
-    }
 
-    const diferenciaBody = round2(Number(diferencia || 0));
-    if (Math.abs(diferenciaBody - diferenciaCalc) > 0.01) {
-      await t.rollback();
-      return res.status(400).json({
-        ok: false,
-        error: `La diferencia enviada (${diferenciaBody}) no coincide con la calculada (${diferenciaCalc}) a partir de los productos devueltos y recibidos.`,
-      });
+      if (!tipo) {
+        await t.rollback();
+        return res.status(400).json({
+          ok: false,
+          error: 'Seleccioná el tipo de venta del cobro de la diferencia.',
+        });
+      }
+
+      if (tipo.habilitado === false) {
+        await t.rollback();
+        return res.status(400).json({
+          ok: false,
+          error: `El tipo de venta "${tipo.tipoVenta}" no está habilitado.`,
+        });
+      }
+
+      tipoVentaId = tipo.id_tipo;
     }
 
     let id_venta_diferencia = null;
@@ -691,14 +736,18 @@ const registrarCambioProducto = async (req, res) => {
     const fecha = fechaActual();
 
     // ==========================================================
-    // 1) CREAR VENTA DE DIFERENCIA (si diferencia > 0)
+    // 1) CREAR VENTA DE DIFERENCIA (solo si el cliente paga)
+    //    La venta representa SOLO el dinero cobrado. Los productos
+    //    entregados quedan como movimientos del cambio (DetalleCambio),
+    //    no como lineas de esta venta: asi el detalle de la venta
+    //    cuadra con su total.
     // ==========================================================
-    if (diferenciaCalc > 0) {
+    if (diferenciaACobrar > 0) {
       const nuevaVenta = await Ventas.create(
         {
-          id_tipo_venta: parseInt(tventaSeleccionada),
+          id_tipo_venta: tipoVentaId,
           fecha,
-          total: diferenciaCalc,
+          total: diferenciaACobrar,
           id_sucursal: sucursal_id,
           id_usuario,
           porcentaje_aplicado: 0,
@@ -709,20 +758,20 @@ const registrarCambioProducto = async (req, res) => {
         { transaction: t },
       );
 
-      // Agregar un detalle "genérico" para registrar el pago de la diferencia
+      // Linea unica del cobro: la diferencia a cobrar por el cambio.
       await DetalleVentas.create(
         {
           id_venta: nuevaVenta.id_venta,
-          id_producto: null, // Sin producto específico
-          nombreProducto: 'Diferencia por cambio',
+          id_producto: null, // Sin producto especifico
+          nombreProducto: 'Diferencia a cobrar por cambio',
           cantidad: 1,
-          precio_unitario: diferenciaCalc,
-          total: diferenciaCalc,
+          precio_unitario: diferenciaACobrar,
+          total: diferenciaACobrar,
           fecha,
           id_sucursal: sucursal_id,
           id_detalle_compra: null,
           id_cliente: req.id_cliente,
-          es_cambio: false, // No es parte del cambio en sí
+          es_cambio: false, // No es parte del cambio en si
         },
         { transaction: t },
       );
@@ -965,36 +1014,11 @@ const registrarCambioProducto = async (req, res) => {
 
         console.log(`✅ DetalleCambio RECIBIDO creado ID: ${detalleCambioCreado.id_detalle_cambio} para lote ${lote.id_detalle_compra}`);
 
-        // 4.2 ✅ NUEVO: Crear DetalleVentas para trazabilidad en reportes
-        if (id_venta_diferencia) {
-          // Si hay venta de diferencia, registrar el producto recibido allí
-          const producto = await Productos.findByPk(producto_id, {
-            transaction: t,
-          });
-
-          await DetalleVentas.create(
-            {
-              id_venta: id_venta_diferencia,
-              id_producto: producto_id,
-              nombreProducto: producto?.nombre || `Producto ${producto_id}`,
-              cantidad: descontar,
-              total: descontar * precio_unitario,
-              id_sucursal: sucursal_id,
-              id_detalle_compra: lote.id_detalle_compra,
-              id_cliente: req.id_cliente,
-              fecha,
-              es_cambio: true, // ✅ Marcar como producto de cambio
-              id_cambio_asociado: detalleCambioCreado.id_detalle_cambio, // ✅ Link para auditoría
-            },
-            { transaction: t },
-          );
-        } else {
-          // Si no hay diferencia (diferencia = 0), crear una "venta fantasma" de $0 o
-          // simplemente registrar en una tabla de auditoría (por ahora se ignora)
-          console.log(
-            `⚠️ Cambio sin diferencia: Se recibe producto ${producto_id} pero no hay Venta asociada`,
-          );
-        }
+        // 4.2 Los productos entregados NO se agregan como líneas de la venta
+        //     de diferencia: esa venta representa solo el dinero cobrado y
+        //     sus renglones tienen que sumar su total. El producto entregado
+        //     queda registrado en DetalleCambio (4.1) y de ahí sale su
+        //     trazabilidad en el historial y en los listados.
 
         // 4.3 Descontar del lote
         lote.stock -= descontar;
@@ -1069,13 +1093,27 @@ const registrarCambioProducto = async (req, res) => {
       id_venta_diferencia,
       devueltos: devuelto?.length || 0,
       recibidos: recibido?.length || 0,
+      totalDevuelto,
+      totalRecibido,
+      diferenciaACobrar,
+      diferenciaFavorComercio,
     });
 
     res.json({
       ok: true,
-      message: 'Cambio registrado correctamente',
+      message:
+        diferenciaFavorComercio > 0
+          ? `Cambio registrado. Diferencia a favor del comercio: ${diferenciaFavorComercio}`
+          : diferenciaACobrar > 0
+            ? `Cambio registrado. Se cobraron ${diferenciaACobrar} por la diferencia`
+            : 'Cambio registrado correctamente',
       cambio_id: cambio.id_cambio,
-      id_venta_diferencia, // Agregar este campo a la respuesta
+      id_venta_diferencia, // null si no hubo cobro
+      total_devuelto: totalDevuelto,
+      total_recibido: totalRecibido,
+      diferencia_a_cobrar: diferenciaACobrar,
+      diferencia_favor_comercio: diferenciaFavorComercio,
+      total_compensado: totalCompensado,
     });
   } catch (error) {
     await t.rollback();

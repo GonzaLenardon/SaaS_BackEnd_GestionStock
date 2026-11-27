@@ -421,7 +421,15 @@ const obtenerAjustesStock = async (req, res) => {
             {
               model: Productos,
               as: 'producto',
-              attributes: ['id_producto', 'nombre'],
+              attributes: [
+                'id_producto',
+                'nombre',
+                'marca',
+                'modelo',
+                'color',
+                'talle',
+                'codigo',
+              ],
             },
           ],
         },

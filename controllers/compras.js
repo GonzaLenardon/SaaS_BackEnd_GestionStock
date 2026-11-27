@@ -570,9 +570,24 @@ const detalleCompra = async (req, res) => {
           as: 'detalles',
           include: [
             {
+              // Ficha completa: el frontend muestra codigo/marca/modelo/talle/color
               model: Productos,
               as: 'producto',
-              attributes: ['nombre'],
+            },
+            {
+              // Reparto de la cantidad por sucursal (mismo include que el listado).
+              // Sin esto el detalle solo muestra el total y no se sabe cuántas
+              // unidades fueron a cada sucursal.
+              model: StockSucursal,
+              as: 'detalleCompraToSucursal',
+              attributes: ['id_sucursal', 'stock'],
+              include: [
+                {
+                  model: Sucursal,
+                  as: 'stockSucursalToSucursal',
+                  attributes: ['nombre'],
+                },
+              ],
             },
           ],
         },

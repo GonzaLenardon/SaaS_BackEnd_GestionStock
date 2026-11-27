@@ -4,6 +4,24 @@ const { crearCurvasPorDefecto } = require('../utils/curvasDefecto');
 const path = require('path');
 const fs = require('fs');
 
+/**
+ * Normaliza los datos opcionales del cliente.
+ *
+ * Los campos vacios se guardan como NULL y no como '': `cuit` y `dominio`
+ * son unicos, asi que dos tiendas con '' en el mismo campo chocarian al
+ * guardar la segunda.
+ */
+const normalizarCliente = (datos) => {
+  const limpio = { ...datos };
+  for (const campo of ['cuit', 'email', 'telefono', 'dominio']) {
+    if (campo in limpio) {
+      const valor = typeof limpio[campo] === 'string' ? limpio[campo].trim() : limpio[campo];
+      limpio[campo] = valor === '' || valor === undefined ? null : valor;
+    }
+  }
+  return limpio;
+};
+
 const allClientes = async (req, res) => {
   try {
     const clientes = await Clientes.findAll({
@@ -43,7 +61,11 @@ const addCliente = async (req, res) => {
     const {
       razon_social, cuit, email, telefono, dominio,
       color_primario, color_secundario, color_terciario, color_fondo,
-    } = req.body;
+    } = normalizarCliente(req.body);
+
+    if (!razon_social || !razon_social.trim()) {
+      return res.status(400).json({ message: 'La razon social es requerida' });
+    }
 
     const clienteExistente = await Clientes.findOne({
       where: { razon_social },
@@ -102,7 +124,13 @@ const updateCliente = async (req, res) => {
     const {
       razon_social, cuit, email, telefono, dominio, activo,
       color_primario, color_secundario, color_terciario, color_fondo,
-    } = req.body;
+    } = normalizarCliente(req.body);
+
+    // La razon social solo se valida si viene en el body: el toggle de
+    // "activo" actualiza el cliente con un solo campo.
+    if ('razon_social' in req.body && (!razon_social || !razon_social.trim())) {
+      return res.status(400).json({ message: 'La razon social es requerida' });
+    }
 
     const cliente = await Clientes.findByPk(id);
     if (!cliente) {
