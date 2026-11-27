@@ -8,6 +8,8 @@
   ProductoCodigos,
   Curvas,
   CurvaTalles,
+  Cambio,
+  DetalleCambio,
 } = require('../models');
 const sequelize = require('../db/conection.js');
 const { Op } = require('sequelize');
@@ -189,8 +191,10 @@ const addProductos = async (req, res) => {
  *               observaciones, id_curva }
  *   items:    [{ talle: 'S', cantidad: 3 }, { talle: 'M', cantidad: 2 }]
  *
- * La cantidad es el numero de etiquetas a imprimir de ese talle, no el stock
- * (el stock se carga en la pantalla de Compra).
+ * La cantidad NO es stock: este endpoint solo crea las fichas de los productos.
+ * Desde la pantalla de Compra llega como referencia de stock inicial por
+ * sucursal (la pantalla precarga sus filas con ella); desde Productos se manda 1.
+ * El stock real se registra al confirmar la compra.
  *
  * Todo se hace en una sola transaccion: si un producto falla, no se crea
  * ninguno. Los talles que ya existen se omiten y se reportan.
@@ -894,6 +898,9 @@ const ventasProducto = async (req, res) => {
       ventaInclude.where = { id_cliente: req.id_cliente };
     }
 
+    // Movimientos de venta y devoluciones. Las filas `es_cambio` (productos
+    // entregados por un cambio) NO se listan aca: salen de DetalleCambio, que
+    // es donde viven ahora.
     const ventasDeProducto = await DetalleVentas.findAll({
       include: [
         {
@@ -903,13 +910,49 @@ const ventasProducto = async (req, res) => {
         },
         ventaInclude,
       ],
-      where,
+      where: { ...where, es_cambio: false },
       order: [['id_detalleventa', 'ASC']],
+    });
+
+    // Entregas por cambio: lo que el cliente se llevo a cambio de otra
+    // mercaderia. Es un movimiento del producto, no una venta.
+    const movimientosCambio = await DetalleCambio.findAll({
+      where,
+      attributes: [
+        'id_detalle_cambio',
+        'id_cambio',
+        'cantidad',
+        'precio_unitario',
+        'tipo',
+      ],
+      include: [
+        {
+          model: Cambio,
+          as: 'cambio',
+          attributes: [
+            'id_cambio',
+            'fecha',
+            'id_venta_original',
+            'id_venta_diferencia',
+          ],
+          include: [
+            {
+              model: Ventas,
+              as: 'ventaOriginal',
+              attributes: ['id_venta', 'correlativo', 'fecha'],
+            },
+          ],
+        },
+      ],
+      order: [['id_detalle_cambio', 'ASC']],
     });
 
     const porCorrelativo = await usaNumeracionCorrelativa(req.id_cliente);
     const respuesta = ventasDeProducto.map((detalle) => ({
       ...detalle.toJSON(),
+      // 'venta' | 'devolucion': el tipo de movimiento, para que el listado
+      // no muestre una devolucion como si fuera una venta.
+      movimiento: detalle.es_reversado ? 'devolucion' : 'venta',
       venta: detalle.venta
         ? {
             ...detalle.venta.toJSON(),
@@ -917,6 +960,39 @@ const ventasProducto = async (req, res) => {
           }
         : null,
     }));
+
+    // Los movimientos por cambio se agregan con la misma forma para que el
+    // listado los muestre junto a las ventas.
+    respuesta.push(
+      ...movimientosCambio
+        .filter((mov) => mov.tipo === 'recibe')
+        .map((mov) => {
+          const cantidad = Number(mov.cantidad);
+          const precioUnitario = Number(mov.precio_unitario);
+          const ventaOriginal = mov.cambio?.ventaOriginal;
+          return {
+            id_detalleventa: `cambio-${mov.id_detalle_cambio}`,
+            id_detalle_cambio: mov.id_detalle_cambio,
+            id_cambio: mov.id_cambio,
+            producto_id: mov.producto_id,
+            cantidad,
+            precio_unitario: precioUnitario,
+            total: Math.round(cantidad * precioUnitario * 100) / 100,
+            fecha: mov.cambio?.fecha ?? null,
+            es_cambio: true,
+            es_reversado: false,
+            movimiento: 'entrega_cambio',
+            venta: ventaOriginal
+              ? {
+                  ...ventaOriginal.toJSON(),
+                  nro: numeroVisible(ventaOriginal, 'id_venta', porCorrelativo),
+                }
+              : null,
+          };
+        }),
+    );
+
+    respuesta.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
 
     res.status(200).send(respuesta);
   } catch (error) {

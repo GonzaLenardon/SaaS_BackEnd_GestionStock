@@ -101,6 +101,7 @@ const {
   resumenDesdeHasta,
   resumenVentasDesdeHasta,
   ventasPorSucursales,
+  resumenAjustesCambios,
   capitalStock,
 } = require('../controllers/listados');
 const {
@@ -132,7 +133,7 @@ router.get('/', (req, res) => {
   res.json({
     ok: true,
     mensaje: '¡Hola Gestion Tienda! 🚀',
-    version: '2.0.2',
+    version: '2.0.4',
   });
 });
 
@@ -411,6 +412,14 @@ router.post(
   authMiddleware,
   tenantMiddleware,
   ventasPorSucursales,
+);
+// Ajustes por cambios (diferencia a favor del comercio): concepto separado
+// de las ventas, con su propio monto y cantidad.
+router.post(
+  '/listados/cambios/ajustes',
+  authMiddleware,
+  tenantMiddleware,
+  resumenAjustesCambios,
 );
 router.post(
   '/listados/capital',

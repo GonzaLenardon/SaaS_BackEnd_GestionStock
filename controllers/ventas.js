@@ -17,6 +17,7 @@ const {
   usaNumeracionCorrelativa,
   numeroVisible,
 } = require('../utils/numeracion');
+const { calcularDiferencia, round2 } = require('../utils/diferenciasCambio');
 
 const allVentas = async (req, res) => {
   const fecha = fechaActual();
@@ -167,28 +168,28 @@ const desdeHasta = async (req, res) => {
 
     const ventasConTotalFinal = await Promise.all(
       ventas.map(async (venta) => {
-        let totalDevuelve = 0;
-        let totalRecibe = 0;
+        // Importes del cambio con la MISMA regla del registro del cambio
+        // (SB/utils/diferenciasCambio.js):
+        //   - diferenciaACobrar: el cliente paga (hubo venta de diferencia)
+        //   - diferenciaFavorComercio: el comercio retiene (ajuste del cambio)
+        const {
+          totalDevuelto,
+          totalRecibido,
+          diferenciaACobrar,
+          diferenciaFavorComercio,
+          totalCompensado,
+        } = calcularDiferencia([
+          {
+            detalles: (venta.ventacambio || []).flatMap(
+              (c) => c.cambiodetalles || [],
+            ),
+          },
+        ]);
 
-        if (Array.isArray(venta.ventacambio)) {
-          for (const cambio of venta.ventacambio) {
-            if (Array.isArray(cambio.cambiodetalles)) {
-              for (const detalle of cambio.cambiodetalles) {
-                const subtotal =
-                  Number(detalle.precio_unitario) * detalle.cantidad;
-
-                if (detalle.tipo === 'devuelve') {
-                  totalDevuelve += subtotal;
-                } else if (detalle.tipo === 'recibe') {
-                  totalRecibe += subtotal;
-                }
-              }
-            }
-          }
-        }
-
-        const diferenciaCambio = totalRecibe - totalDevuelve;
-        // Total histórico: la diferencia de un cambio ya es una venta propia.
+        const diferenciaCambio = round2(totalRecibido - totalDevuelto);
+        // Total histórico: la diferencia a cobrar de un cambio ya es una venta
+        // propia. La diferencia a favor del comercio NO suma acá: es un ajuste
+        // del cambio, no una venta.
         const totalFinal = Number(venta.total);
 
         // ============================================================
@@ -223,9 +224,12 @@ const desdeHasta = async (req, res) => {
         return {
           ...venta.toJSON(),
           nro: numeroVisible(venta, 'id_venta', porCorrelativo),
-          totalDevuelve,
-          totalRecibe,
+          totalDevuelve: totalDevuelto,
+          totalRecibe: totalRecibido,
           diferenciaCambio,
+          diferenciaACobrar,
+          diferenciaFavorComercio,
+          totalCompensado,
           totalFinal,
           ventaOriginalAsociada,
         };
@@ -336,8 +340,25 @@ const ventasPorSucursal = async (req, res) => {
           }
         }
 
+        // Importes del cambio con nombre explicito:
+        //   - diferenciaACobrar: el cliente paga (hubo venta de diferencia)
+        //   - diferenciaFavorComercio: el comercio retiene (ajuste del cambio)
+        const {
+          diferenciaACobrar,
+          diferenciaFavorComercio,
+          totalCompensado,
+        } = calcularDiferencia([
+          {
+            detalles: (venta.ventacambio || []).flatMap(
+              (c) => c.cambiodetalles || [],
+            ),
+          },
+        ]);
+
         const diferenciaCambio = totalRecibe - totalDevuelve;
-        // Total histórico: la diferencia de un cambio ya es una venta propia.
+        // Total histórico: la diferencia a cobrar de un cambio ya es una venta
+        // propia. La diferencia a favor del comercio NO suma acá: es un ajuste
+        // del cambio, no una venta.
         const totalFinal = Number(venta.total);
 
         // ============================================================
@@ -372,9 +393,12 @@ const ventasPorSucursal = async (req, res) => {
         return {
           ...venta.toJSON(),
           nro: numeroVisible(venta, 'id_venta', porCorrelativo),
-          totalDevuelve,
-          totalRecibe,
+          totalDevuelve: totalDevuelto,
+          totalRecibe: totalRecibido,
           diferenciaCambio,
+          diferenciaACobrar,
+          diferenciaFavorComercio,
+          totalCompensado,
           totalFinal,
           ventaOriginalAsociada,
         };
@@ -1697,6 +1721,12 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
             },
           ],
         },
+        {
+          // La sucursal de la venta: el cambio se registra en ella
+          model: Sucursal,
+          as: 'sucursal',
+          attributes: ['nombre'],
+        },
       ],
     });
 
@@ -1767,6 +1797,7 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
       fecha: ventaOriginal.fecha,
       total: ventaOriginal.total,
       id_sucursal: ventaOriginal.id_sucursal,
+      sucursal: ventaOriginal.sucursal?.nombre ?? null,
       productos: ventaOriginal.detalles.map((d) => ({
         id_producto: d.producto?.id_producto || d.id_producto,
         nombre: d.producto?.nombre || null,
@@ -1803,6 +1834,11 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
           reemplazado: dc.reemplazado,
         }));
 
+      // Importes del cambio, con nombre explicito (misma regla que el
+      // registro del cambio): el saldo va a cobrar o queda a favor del
+      // comercio. El frontend los muestra tal cual.
+      const totales = calcularDiferencia([cambio]);
+
       return {
         numero: index + 1,
         id_cambio: cambio.id_cambio,
@@ -1813,6 +1849,7 @@ const obtenerVentaConHistorialYVigentes = async (req, res) => {
         nro_venta_diferencia:
           nroDeVentaDiferencia.get(cambio.id_venta_diferencia) ??
           cambio.id_venta_diferencia,
+        ...totales,
         devueltos,
         recibidos,
       };
